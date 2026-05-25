@@ -1,0 +1,53 @@
+# ============================================================
+#  ROOT .gitignore — Monorepo skripsi_code
+#  Berisi aturan umum yang berlaku untuk kedua sub-proyek.
+#  Aturan spesifik ada di masing-masing sub-folder.
+# ============================================================
+
+# ── OS & sistem ─────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ── IDE / Editor ────────────────────────────────────────────
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# ── File instalasi yang salah tempat (pip terpaste, dsb.) ───
+=*
+
+# ── Claude Code & Claude Flow runtime ───────────────────────
+.claude/
+.claude-flow/
+.claudeignore
+
+# ── Ruflo / Claude agent runtime ────────────────────────────
+.swarm/
+ruvector.db
+.jupyter_ystore.db
+
+# ── Secrets & konfigurasi lokal ─────────────────────────────
+# .env.example boleh di-commit; .env tidak boleh
+.env
+.env.local
+.env.*.local
+
+# ── Log umum ────────────────────────────────────────────────
+*.log
+*.log.*

@@ -1,0 +1,133 @@
+# ============================================================
+#  stock_prediction/.gitignore
+#  Python 3.12 + uv + FastAPI + TensorFlow + PyTorch + HuggingFace
+# ============================================================
+
+# ── Python bytecode & cache ─────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# ── Virtual environment ──────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.python-version.bak
+
+# ── uv / pip / packaging ────────────────────────────────────
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+pip-wheel-metadata/
+MANIFEST
+
+# ── Type checker & linter cache ─────────────────────────────
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+
+# ── Testing ─────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.hypothesis/
+.tox/
+nosetests.xml
+test-results/
+
+# ── Jupyter ─────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.jupyter_ystore.db
+profile_default/
+ipython_config.py
+
+# ── Environment / Secrets ────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Database ─────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── ML Model weights & artifact biner ───────────────────────
+# TensorFlow / Keras
+*.h5
+*.keras
+*.pb
+saved_model/
+
+# PyTorch
+*.pt
+*.pth
+*.ckpt
+
+# Scikit-learn / general ML
+*.pkl
+*.pickle
+*.joblib
+
+# ONNX
+*.onnx
+
+# ── HuggingFace model cache (sangat besar, download ulang) ───
+models/finbert/models--*/
+models/lstm/models--*/
+.cache/huggingface/
+
+# ── Data — abaikan file besar, pertahankan struktur folder ──
+data/raw/
+data/processed/
+data/artifacts/
+
+# Pertahankan placeholder agar struktur folder masuk git
+!data/raw/.gitkeep
+!data/raw/stocks/.gitkeep
+!data/raw/news/.gitkeep
+!data/processed/.gitkeep
+!data/processed/stocks/.gitkeep
+!data/processed/sentiment/.gitkeep
+!data/artifacts/.gitkeep
+!data/artifacts/lstm_weights/.gitkeep
+!data/artifacts/finbert_weights/.gitkeep
+
+# ── Logs ────────────────────────────────────────────────────
+logs/**/*.log
+logs/**/*.log.*
+!logs/api/.gitkeep
+!logs/pipeline/.gitkeep
+!logs/models/.gitkeep
+
+# ── Experiment tracking ──────────────────────────────────────
+mlruns/
+wandb/
+.neptune/
+outputs/          # Hydra default output dir
+
+# ── Claude Code & Claude Flow runtime ───────────────────────
+.claude/
+.claude-flow/
+.claudeignore
+
+# ── Ruflo / Claude agent runtime ────────────────────────────
+.swarm/
+ruvector.db
+.jupyter_ystore.db
+
+# ── Profiling & benchmark ───────────────────────────────────
+*.prof
+*.lprof
+profile_output/
+
+# ── File instalasi yang salah tempat ────────────────────────
+=*

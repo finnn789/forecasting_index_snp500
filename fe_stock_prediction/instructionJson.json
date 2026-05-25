@@ -1,0 +1,43 @@
+{
+  "task": "Refactor SentimentPage to EDA Dashboard",
+  "environment": {
+    "api_base_url": "http://localhost:8000",
+    "framework": "React/Next.js with Tailwind CSS",
+    "chart_library": "Recharts / Chart.js"
+  },
+  "endpoints": [
+    {
+      "path": "/api/v1/data/eda/news-per-year",
+      "purpose": "Volume berita tahunan",
+      "visualization": "Bar Chart",
+      "logic": "Tampilkan tren pertumbuhan data headline dari tahun ke tahun."
+    },
+    {
+      "path": "/api/v1/data/eda/news-per-day",
+      "purpose": "Statistik aktivitas harian",
+      "visualization": "Summary Cards & Line Chart",
+      "logic": "Tampilkan metrik Mean, Max, dan Min sebagai statistik utama di bagian atas."
+    },
+    {
+      "path": "/api/v1/data/eda/headline-length",
+      "purpose": "Distribusi panjang teks",
+      "visualization": "Histogram / Area Chart",
+      "logic": "Analisis karakteristik teks berdasarkan jumlah karakter dan kata."
+    },
+    {
+      "path": "/api/v1/data/eda/sentiment-distribution",
+      "purpose": "Proporsi sentimen",
+      "visualization": "Pie Chart / Stacked Bar",
+      "logic": "Tampilkan sebaran Positive, Negative, Neutral beserta rata-rata sentiment_score."
+    }
+  ],
+  "ui_requirements": {
+    "layout": "Grid-based dashboard (2x2)",
+    "components": [
+      "Loading State: Tampilkan skeleton/spinner saat fetch data.",
+      "Error Handling: Alert jika koneksi ke localhost:8000 gagal.",
+      "Interactivity: Tooltips pada setiap chart untuk melihat nilai presisi."
+    ]
+  },
+  "instruction": "Ganti seluruh konten pada SentimentPage yang ada saat ini. Implementasikan fetch data menggunakan useEffect atau React Query. Pastikan setiap endpoint dipetakan ke komponen visualisasi yang sesuai agar data mudah diinterpretasi oleh user."
+}
