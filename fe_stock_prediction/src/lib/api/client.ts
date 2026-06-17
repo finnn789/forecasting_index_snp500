@@ -1,29 +1,13 @@
-import { API_URL } from '../constants'
-
-export class ApiError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-  ) {
-    super(message)
-    this.name = 'ApiError'
-  }
-}
-
-export async function apiFetch<T>(
-  path: string,
-  options?: RequestInit,
-): Promise<T> {
-  const url = `${API_URL}${path}`
-  const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    ...options,
-  })
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText)
-    throw new ApiError(res.status, text)
-  }
-
-  return res.json() as Promise<T>
-}
+export { apiFetch } from './core/client'
+export type { ApiFetchOptions } from './core/client'
+export {
+  ApiError,
+  NetworkError,
+  TimeoutError,
+  ParseError,
+  isApiError,
+  isNetworkError,
+  isTimeoutError,
+  isParseError,
+} from './core/errors'
+export { withMock, delay } from './core/mock'

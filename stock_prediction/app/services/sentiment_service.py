@@ -9,26 +9,13 @@ from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
-from fastapi import HTTPException
 
 from pipeline.preprocessing.text_preprocessor import TextPreprocessor
+from app.core.exceptions import NotFoundError
 from app.repositories import NewsRepository, SentimentRepository
+from app.repositories.provider import get_repositories
 
 load_dotenv()
-
-# ---------------------------------------------------------------------------
-# Lazy repository cache
-# ---------------------------------------------------------------------------
-
-_repos: dict | None = None
-
-
-def _get_repos() -> dict:
-    global _repos
-    if _repos is None:
-        from app.repositories import get_default_repositories
-        _repos = get_default_repositories()
-    return _repos
 
 
 _REQUIRED_MODEL_FILES = [
@@ -69,94 +56,6 @@ def _clean_csv() -> Path:
 
 def _daily_csv() -> Path:
     return _processed_dir() / "headlines_daily_sentiment.csv"
-
-
-def run_preprocessing_pipeline(
-    start_date: str | None = None,
-    end_date: str | None = None,
-    batch_size: int = 32,
-) -> dict:
-    t_start = time.time()
-    raw_csv = _raw_csv()
-    processed_dir = _processed_dir()
-    clean_csv = _clean_csv()
-    daily_csv = _daily_csv()
-
-    if not raw_csv.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=f"Raw CSV tidak ditemukan: {raw_csv}",
-        )
-
-    try:
-        df_raw = pd.read_csv(raw_csv, usecols=["Title", "Date", "CP"])
-    except ValueError as e:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Kolom yang dibutuhkan (Title, Date, CP) tidak lengkap di CSV: {e}",
-        )
-
-    df_raw["Date"] = pd.to_datetime(df_raw["Date"], errors="coerce")
-
-    try:
-        if start_date:
-            df_raw = df_raw[df_raw["Date"] >= pd.Timestamp(start_date)]
-        if end_date:
-            df_raw = df_raw[df_raw["Date"] <= pd.Timestamp(end_date)]
-    except Exception as e:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Format tanggal tidak valid (gunakan YYYY-MM-DD): {e}",
-        )
-
-    if df_raw.empty:
-        raise HTTPException(
-            status_code=404,
-            detail="Tidak ada data pada rentang tanggal tersebut.",
-        )
-
-    try:
-        preprocessor = TextPreprocessor(
-            model_path=_resolve_model_path(),
-            batch_size=batch_size,
-            device=int(os.environ["FINBERT_DEVICE"]),
-        )
-        df_clean = preprocessor.process(df_raw)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"TextPreprocessor gagal memproses data: {e}",
-        )
-
-    try:
-        processed_dir.mkdir(parents=True, exist_ok=True)
-        df_clean.to_csv(clean_csv, index=False)
-
-        df_daily = _aggregate_daily(df_clean)
-        df_daily.to_csv(daily_csv, index=False)
-    except OSError as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Gagal menyimpan file output: {e}",
-        )
-
-    duration = round(time.time() - t_start, 2)
-    sample = df_daily.head(5).to_dict(orient="records")
-    actual_dates = df_daily["Date"]
-    date_range = {
-        "start": str(actual_dates.min().date()) if len(df_daily) else None,
-        "end": str(actual_dates.max().date()) if len(df_daily) else None,
-    }
-
-    return {
-        "status": "success",
-        "total_headlines": len(df_clean),
-        "total_days": len(df_daily),
-        "output_path": str(daily_csv),
-        "date_range": date_range,
-        "duration_seconds": duration,
-        "sample": sample,
-    }
 
 
 def run_preprocessing_pipeline_stream(
@@ -314,7 +213,7 @@ def _aggregate_daily(df_clean: pd.DataFrame) -> pd.DataFrame:
 
 
 def get_pipeline_status() -> dict:
-    repos = _get_repos()
+    repos = get_repositories()
     news_repo: NewsRepository = repos["news"]
     sentiment_repo: SentimentRepository = repos["sentiment"]
 
@@ -359,14 +258,13 @@ def get_pipeline_status() -> dict:
 
 
 def get_daily_preview(page: int = 1, page_size: int = 20) -> dict:
-    repos = _get_repos()
+    repos = get_repositories()
     sentiment_repo: SentimentRepository = repos["sentiment"]
 
     daily_csv = _daily_csv()
     if not daily_csv.exists():
-        raise HTTPException(
-            status_code=503,
-            detail="Pipeline belum dijalankan. Jalankan POST /sentiment/pipeline/run terlebih dahulu.",
+        raise NotFoundError(
+            "Pipeline belum dijalankan. Jalankan POST /sentiment/pipeline/run terlebih dahulu.",
         )
 
     try:

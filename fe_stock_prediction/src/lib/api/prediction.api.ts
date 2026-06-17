@@ -1,18 +1,37 @@
-import { USE_MOCK } from '../constants'
-import type { PredictionRequest, PredictionResult } from '../../types/prediction'
+import type {
+  PredictionRequest,
+  DirectionPrediction,
+  ModelInfo,
+  BacktestResult,
+} from '../../types/prediction'
 import { apiFetch } from './client'
+import { withMock } from './core/mock'
 import { ENDPOINTS } from './endpoints'
-import { mockPrediction } from './mock/prediction.mock'
+import {
+  mockDirectionPrediction,
+  mockModelInfo,
+  mockBacktest,
+} from './mock/prediction.mock'
 
-const delay = (ms: number) => new Promise(r => setTimeout(r, ms))
+export const predictDirection = withMock(
+  (req: PredictionRequest) =>
+    apiFetch<DirectionPrediction>(ENDPOINTS.PREDICT, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+  (_req: PredictionRequest) => ({ ...mockDirectionPrediction }),
+  1200,
+)
 
-export async function getPrediction(req: PredictionRequest): Promise<PredictionResult> {
-  if (USE_MOCK) {
-    await delay(1200)
-    return { ...mockPrediction, ticker: req.ticker }
-  }
-  return apiFetch<PredictionResult>(ENDPOINTS.PREDICT, {
-    method: 'POST',
-    body: JSON.stringify(req),
-  })
-}
+export const getModelStatus = withMock(
+  () => apiFetch<ModelInfo>(ENDPOINTS.PREDICT_STATUS),
+  () => ({ ...mockModelInfo }),
+  400,
+)
+
+export const getBacktest = withMock(
+  (split = 'test') =>
+    apiFetch<BacktestResult>(`${ENDPOINTS.PREDICT_BACKTEST}?split=${split}`),
+  (_split = 'test') => ({ ...mockBacktest }),
+  800,
+)

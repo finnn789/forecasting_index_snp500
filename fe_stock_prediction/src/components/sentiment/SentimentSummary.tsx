@@ -1,6 +1,6 @@
 import { TrendingUp, TrendingDown, Minus, ArrowUpRight, ArrowDownRight } from 'lucide-react'
 import { cn } from '../../lib/utils'
-import type { SentimentSummary as SentimentSummaryType } from '../../types/sentiment'
+import type { SentimentDistribution as SentimentSummaryType } from '../../types/sentiment'
 import { SentimentBadge } from '../shared/StatusBadge'
 
 interface SentimentSummaryProps {

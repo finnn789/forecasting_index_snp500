@@ -30,3 +30,8 @@ from app.api.v1.routes_sentiment import router as sentiment_router
 
 # Routes: POST /api/v1/sentiment/pipeline/run, GET /api/v1/sentiment/...
 api_router.include_router(sentiment_router, prefix="/api/v1")
+
+from app.api.v1.routes_prediction import router as prediction_router
+
+# Routes: POST /api/v1/predict, GET /api/v1/predict/model/status
+api_router.include_router(prediction_router, prefix="/api/v1")

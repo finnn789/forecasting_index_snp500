@@ -10,14 +10,17 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from 'recharts'
+import type { ValueType, NameType } from 'recharts/types/component/DefaultTooltipContent'
 import type { DailySentiment } from '../../types/sentiment'
 
 interface SentimentChartProps {
   data: DailySentiment[]
 }
 
-const fmt = (d: string) =>
-  new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })
+const fmt = (d: unknown) =>
+  typeof d === 'string'
+    ? new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })
+    : String(d)
 
 export function SentimentChart({ data }: SentimentChartProps) {
   /* Tampilkan 30 titik terakhir agar chart tidak terlalu padat */
@@ -75,25 +78,28 @@ export function SentimentChart({ data }: SentimentChartProps) {
           }}
           labelStyle={{ color: 'oklch(95% 0.01 264)', fontWeight: 600 }}
           labelFormatter={fmt}
-          formatter={(value: number, name: string) => {
-            const labels: Record<string, string> = {
+          formatter={(value: ValueType | undefined, name: NameType | undefined) => {
+            const labels = {
               positive: 'Positif',
               negative: 'Negatif',
               neutral:  'Netral',
               avgScore: 'Skor Rata-rata',
-            }
+            } as const
+            const labelKey = name as keyof typeof labels | undefined
             return [
-              name === 'avgScore' ? value.toFixed(3) : value,
-              labels[name] ?? name,
+              typeof value === 'number' && name === 'avgScore' ? value.toFixed(3) : value,
+              labelKey && labelKey in labels ? labels[labelKey] : name,
             ]
           }}
         />
 
         <Legend
           wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
-          formatter={v =>
-            ({ positive: 'Positif', negative: 'Negatif', neutral: 'Netral', avgScore: 'Skor Rata-rata' }[v] ?? v)
-          }
+          formatter={(v) => {
+            const labels = { positive: 'Positif', negative: 'Negatif', neutral: 'Netral', avgScore: 'Skor Rata-rata' } as const
+            const key = v as keyof typeof labels | string
+            return (key in labels ? labels[key as keyof typeof labels] : v) ?? v
+          }}
         />
 
         {/* Stacked bars — jumlah berita per kategori */}

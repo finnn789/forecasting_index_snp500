@@ -1,9 +1,19 @@
 from __future__ import annotations
 from pathlib import Path
 from .base import FileBasedRepository
+from .news_repository import NewsRepository
+from .sentiment_repository import SentimentRepository
+from .stock_repository import StockRepository
+from .artifact_repository import ArtifactRepository
 
 # Lazy imports: repos konkret dibuat di Wave 2. Factory pakai lazy import.
+from typing import TypedDict
 
+class Repositories(TypedDict):
+    stock: StockRepository
+    news: NewsRepository
+    sentiment: SentimentRepository
+    artifact: ArtifactRepository
 
 def get_default_repositories() -> dict:
     """Factory: return dict of configured repositories.
@@ -11,10 +21,6 @@ def get_default_repositories() -> dict:
     Lazy import supaya module ini bisa di-load meski repo konkret belum ada.
     """
     from app.core.settings import settings
-    from .stock_repository import StockRepository
-    from .news_repository import NewsRepository
-    from .sentiment_repository import SentimentRepository
-    from .artifact_repository import ArtifactRepository
 
     base = Path(".")
     return {
@@ -37,4 +43,11 @@ def get_default_repositories() -> dict:
     }
 
 
-__all__ = ["FileBasedRepository", "get_default_repositories"]
+__all__ = [
+    "FileBasedRepository",
+    "NewsRepository",
+    "SentimentRepository",
+    "StockRepository",
+    "ArtifactRepository",
+    "get_default_repositories",
+]

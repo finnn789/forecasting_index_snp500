@@ -155,8 +155,23 @@ class DataAligner:
             "align() dipanggil — stock: %d baris | sentiment: %d baris",
             len(df_stock), len(df_sentiment),
         )
-        logger.info("Aturan alignment belum diimplementasikan.")
-        raise NotImplementedError("Aturan alignment akan ditambahkan pada sesi berikutnya.")
+
+        # Inner join on Date — hanya hari yang data saham DAN sentimen tersedia
+        df_aligned = pd.merge(
+            df_stock,
+            df_sentiment[["Date", "sentiment_mean"]],
+            on="Date",
+            how="inner",
+        )
+        df_aligned = df_aligned.sort_values("Date").reset_index(drop=True)
+
+        logger.info(
+            "align() selesai — %d baris hasil join (%s – %s)",
+            len(df_aligned),
+            df_aligned["Date"].min().date(),
+            df_aligned["Date"].max().date(),
+        )
+        return df_aligned
 
     # ------------------------------------------------------------------
     # Orchestrator

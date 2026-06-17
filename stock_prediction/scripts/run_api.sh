@@ -12,5 +12,7 @@ echo "   ReDoc       : http://localhost:8000/redoc"
 echo "   Status      : http://localhost:8000/api/status"
 echo "   Health      : http://localhost:8000/api/health"
 echo ""
+echo "🔗 Menggunakan Python dari .venv..."
+echo ""
 
-python server.py
+./.venv/bin/python server.py

@@ -19,7 +19,7 @@ export interface DailySentiment {
   total: number
 }
 
-export interface SentimentSummary {
+export interface SentimentDistribution {
   ticker: string
   period: string
   avgScore: number
@@ -27,4 +27,13 @@ export interface SentimentSummary {
   trend: 'improving' | 'declining' | 'stable'
   daily: DailySentiment[]
   recentNews: NewsItem[]
+  // Distribution data
+  data: Array<{
+    label: SentimentLabel
+    count: number
+    pct: number
+  }>
+  sentiment_score_mean: number
+  sentiment_score_std: number
+  plot_hint?: string
 }

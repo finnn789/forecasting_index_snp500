@@ -1,43 +1,54 @@
-import type { PipelineStatus, RunHistoryItem, RunLog } from '../../../types/pipeline'
-import { PIPELINE_STAGES } from '../../constants'
+import type {
+  SentimentPipelineStatus,
+  FinbertModelStatus,
+  PipelineProgressEvent,
+} from '../../../types/pipeline'
 
-export const mockPipelineStatus: PipelineStatus = {
-  runId: 'run-mock-001',
-  state: 'running',
-  startedAt: new Date(Date.now() - 45_000).toISOString(),
-  stages: PIPELINE_STAGES.map((s, i) => ({
-    id: s.id,
-    label: s.label,
-    state: i < 2 ? 'done' : i === 2 ? 'running' : 'idle',
-    startedAt:  i <= 2 ? new Date(Date.now() - (5 - i) * 15_000).toISOString() : undefined,
-    finishedAt: i < 2  ? new Date(Date.now() - (4 - i) * 15_000).toISOString() : undefined,
-    durationMs: i < 2  ? (i + 1) * 12_000 : undefined,
-  })),
-  progress: 35,
+export const mockPipelineStatus: SentimentPipelineStatus = {
+  clean_file_exists: true,
+  daily_file_exists: true,
+  total_headlines: 19127,
+  total_days: 3507,
+  date_range: { start: '2008-01-02', end: '2024-03-04' },
 }
 
-export const mockRunHistory: RunHistoryItem[] = [
-  {
-    runId: 'run-mock-000',
-    startedAt: new Date(Date.now() - 3_600_000).toISOString(),
-    finishedAt: new Date(Date.now() - 3_480_000).toISOString(),
-    state: 'done',
-    durationMs: 120_000,
+export const mockFinbertStatus: FinbertModelStatus = {
+  is_available: true,
+  model_path: 'models/finbert/models--ProsusAI--finbert',
+  source: 'local_snapshot',
+  snapshot_path:
+    'models/finbert/models--ProsusAI--finbert/snapshots/4556d13015211d73dccd3fdd39d39232506f3e43',
+  required_files: {
+    'config.json': true,
+    'pytorch_model.bin': true,
+    'tokenizer_config.json': true,
+    'vocab.txt': true,
   },
-  {
-    runId: 'run-mock-099',
-    startedAt: new Date(Date.now() - 86_400_000).toISOString(),
-    finishedAt: new Date(Date.now() - 86_350_000).toISOString(),
-    state: 'error',
-    durationMs: 50_000,
-    errorMessage: 'FinBERT OOM pada batch ke-42',
-  },
+  model_size_mb: 1253.48,
+}
+
+// Urutan event yang meniru stream SSE backend.
+const MOCK_STEPS: PipelineProgressEvent[] = [
+  { step: 'loading_data',  pct: 10,  msg: 'Memuat 19.127 headline...' },
+  { step: 'filtering',     pct: 20,  msg: 'Memfilter rentang tanggal...' },
+  { step: 'loading_model', pct: 35,  msg: 'Memuat model FinBERT (1.25 GB)...' },
+  { step: 'model_ready',   pct: 45,  msg: 'Model siap. Memulai inferensi.' },
+  { step: 'inference',     pct: 60,  msg: 'Inferensi batch 1/8...' },
+  { step: 'inference',     pct: 78,  msg: 'Inferensi batch 5/8...' },
+  { step: 'aggregating',   pct: 88,  msg: 'Mengagregasi sentimen harian...' },
+  { step: 'saving',        pct: 95,  msg: 'Menyimpan headlines_daily_sentiment.csv...' },
+  { step: 'done',          pct: 100, msg: 'Pipeline selesai.', result: { total_headlines: 19127, total_days: 3507 } },
 ]
 
-export const mockLogs: RunLog[] = [
-  { timestamp: new Date().toISOString(), level: 'INFO',    stage: 'fetch',     message: 'Memulai unduh data OHLCV BBCA.JK...' },
-  { timestamp: new Date().toISOString(), level: 'INFO',    stage: 'fetch',     message: '2450 baris berhasil diunduh.' },
-  { timestamp: new Date().toISOString(), level: 'INFO',    stage: 'clean',     message: 'Handling 12 missing values via forward-fill.' },
-  { timestamp: new Date().toISOString(), level: 'INFO',    stage: 'sentiment', message: 'Memproses 318 headlines dengan FinBERT...' },
-  { timestamp: new Date().toISOString(), level: 'WARNING', stage: 'sentiment', message: 'Batch 3/8 lambat, GPU utilization 94%.' },
-]
+/** Simulasi stream progress saat VITE_USE_MOCK=true. */
+export async function simulatePipelineRun(
+  onEvent: (e: PipelineProgressEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  for (const ev of MOCK_STEPS) {
+    if (signal?.aborted) return
+    await new Promise<void>(r => setTimeout(r, 600))
+    if (signal?.aborted) return
+    onEvent(ev)
+  }
+}

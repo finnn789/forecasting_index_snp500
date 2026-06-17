@@ -3,12 +3,15 @@ import { Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button'
 import { Skeleton } from '../components/ui/skeleton'
-import { PipelineStatusBadge } from '../components/shared/StatusBadge'
+import { Badge } from '../components/ui/badge'
 import { PageContainer } from '../components/layout/PageContainer'
-import { usePipelineStatus } from '../hooks/usePipelineStatus'
+import { useSentimentPipelineStatus } from '../hooks/useSentimentPipeline'
+import { formatNumber } from '../lib/format'
 
 export function DashboardPage() {
-  const { status, loading } = usePipelineStatus(5000)
+  const { data: status, loading } = useSentimentPipelineStatus()
+
+  const dataReady = !!status?.clean_file_exists && !!status?.daily_file_exists
 
   return (
     <PageContainer title="Dashboard" description="Ringkasan sistem prediksi saham">
@@ -16,26 +19,26 @@ export function DashboardPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           icon={<GitBranch className="size-5" />}
-          label="Status Pipeline"
+          label="Data Sentimen"
           value={
             loading ? <Skeleton className="h-5 w-20" /> :
-            status ? <PipelineStatusBadge state={status.state} /> : '—'
+            status ? <Badge variant={dataReady ? 'done' : 'idle'} dot>{dataReady ? 'Siap' : 'Belum lengkap'}</Badge> : '—'
           }
         />
         <StatCard
           icon={<Activity className="size-5" />}
-          label="Progress"
-          value={loading ? <Skeleton className="h-5 w-12" /> : status ? `${status.progress}%` : '—'}
+          label="Total Headline"
+          value={loading ? <Skeleton className="h-5 w-12" /> : status?.total_headlines != null ? formatNumber(status.total_headlines) : '—'}
         />
         <StatCard
           icon={<TrendingUp className="size-5" />}
-          label="Prediksi Terakhir"
-          value="BBCA +1.89%"
+          label="Ticker Model"
+          value="GSPC (S&P 500)"
         />
         <StatCard
           icon={<Newspaper className="size-5" />}
-          label="Sentimen Hari Ini"
-          value="Positif 0.18"
+          label="Rentang Data"
+          value={loading ? <Skeleton className="h-5 w-24" /> : status?.date_range?.end ?? '—'}
         />
       </div>
 

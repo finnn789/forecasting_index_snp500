@@ -1,4 +1,4 @@
-import type { SentimentSummary } from '../../../types/sentiment'
+import type { SentimentDistribution } from '../../../types/sentiment'
 
 const days = (n: number) => {
   const d = new Date()
@@ -6,9 +6,9 @@ const days = (n: number) => {
   return d.toISOString().split('T')[0]
 }
 
-export const mockSentiment: SentimentSummary = {
-  ticker: 'BBCA.JK',
-  period: '30 hari terakhir',
+export const mockSentiment: SentimentDistribution = {
+  ticker: 'GSPC',
+  period: '2018-2024',
   avgScore: 0.18,
   dominant: 'positive',
   trend: 'improving',
@@ -21,10 +21,18 @@ export const mockSentiment: SentimentSummary = {
     total: 0,
   })).map(d => ({ ...d, total: d.positive + d.negative + d.neutral })),
   recentNews: [
-    { id: '1', title: 'BBCA Catat Laba Bersih Rp12,8 T di Q1 2024', date: days(-1), source: 'Bisnis.com',    sentiment: 'positive', score: 0.82 },
-    { id: '2', title: 'BI Tahan Suku Bunga, Perbankan Diuntungkan',   date: days(-2), source: 'Kontan',       sentiment: 'positive', score: 0.61 },
-    { id: '3', title: 'Volatilitas Rupiah Tekan Saham Perbankan',     date: days(-2), source: 'CNBC Indonesia', sentiment: 'negative', score: -0.44 },
-    { id: '4', title: 'BBCA Ekspansi Digital Banking ke Segmen UMKM', date: days(-3), source: 'Detik Finance', sentiment: 'positive', score: 0.55 },
-    { id: '5', title: 'Analis: Target Harga BBCA Direvisi ke 10.500', date: days(-4), source: 'Bloomberg',    sentiment: 'neutral',  score: 0.12 },
+    { id: '1', title: 'S&P 500 Records Strong Q1 2024 Gains',        date: days(-1), source: 'Bloomberg',     sentiment: 'positive', score: 0.82 },
+    { id: '2', title: 'Fed Holds Rates, Markets Rally on Tech',       date: days(-2), source: 'Reuters',       sentiment: 'positive', score: 0.61 },
+    { id: '3', title: 'Inflation Data Sparks Volatility on Wall St',  date: days(-2), source: 'CNBC',          sentiment: 'negative', score: -0.44 },
+    { id: '4', title: 'AI Sector Drives S&P 500 to Record Highs',    date: days(-3), source: 'WSJ',           sentiment: 'positive', score: 0.55 },
+    { id: '5', title: 'Analysts Revise S&P 500 Year-End Targets Up', date: days(-4), source: 'MarketWatch',   sentiment: 'neutral',  score: 0.12 },
   ],
+  data: [
+    { label: 'neutral',  count: 10956, pct: 57.28 },
+    { label: 'negative', count: 4777,  pct: 24.98 },
+    { label: 'positive', count: 3394,  pct: 17.74 },
+  ],
+  sentiment_score_mean: 0.8192,
+  sentiment_score_std: 0.1395,
+  plot_hint: 'bar chart — x: label, y: count',
 }

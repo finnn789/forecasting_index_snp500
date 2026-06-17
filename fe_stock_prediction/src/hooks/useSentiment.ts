@@ -1,22 +1,12 @@
-import { useEffect, useState } from 'react'
-import type { SentimentSummary } from '../types/sentiment'
+import type { AsyncState } from '../types/async'
+import type { SentimentDistribution } from '../types/sentiment'
+import { useAsync } from './core/useAsync'
 import { getSentiment } from '../lib/api/sentiment.api'
 
-export function useSentiment(ticker: string) {
-  const [data, setData]       = useState<SentimentSummary | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError]     = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!ticker) return
-    setLoading(true)
-    setError(null)
-
-    getSentiment(ticker)
-      .then(setData)
-      .catch(e => setError(e instanceof Error ? e.message : 'Gagal mengambil data sentimen'))
-      .finally(() => setLoading(false))
-  }, [ticker])
-
-  return { data, loading, error }
+export function useSentiment(ticker: string): AsyncState<SentimentDistribution> & { refetch: () => void } {
+  return useAsync(
+    () => getSentiment(),
+    [ticker],
+    { enabled: !!ticker },
+  )
 }

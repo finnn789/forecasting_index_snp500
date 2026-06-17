@@ -205,25 +205,6 @@ class TestDataEdaEndpoints:
 
 
 # ---------------------------------------------------------------------------
-# Test: Feature Engineering Endpoint (data/feature-engineering/run)
-# ---------------------------------------------------------------------------
-
-class TestDataFeatureEngineeringRun:
-    """Test /api/v1/data/feature-engineering/run"""
-
-    def test_feature_engineering_run(self, client):
-        """GET /api/v1/data/feature-engineering/run — FeatureEngineeringResponse envelope"""
-        resp = client.get("/api/v1/data/feature-engineering/run")
-
-        if resp.status_code == 503:
-            body = assert_error_envelope(resp, expected_status=503)
-        else:
-            body = assert_success_envelope(resp, expected_status=200)
-            assert isinstance(body["data"], dict)
-            assert "status" in body["data"], "data should have 'status'"
-
-
-# ---------------------------------------------------------------------------
 # Test: Sentiment Pipeline Endpoints
 # ---------------------------------------------------------------------------
 

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "claude-flow": {
+      "command": "node",
+      "args": [
+        "/media/finn/Project_Space/mcp-tools/ruflo/bin/cli.js",
+        "mcp"
+      ],
+      "env": {
+        "NODE_NO_WARNINGS": "1"
+      }
+    }
+  }
+}

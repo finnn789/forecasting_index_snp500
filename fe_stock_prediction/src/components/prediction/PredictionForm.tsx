@@ -1,9 +1,6 @@
-import { useState } from 'react'
 import { Loader2, Sparkles } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Label } from '../ui/label'
-import { Input } from '../ui/input'
-import { TickerSelector } from './TickerSelector'
 import type { PredictionRequest } from '../../types/prediction'
 
 interface PredictionFormProps {
@@ -12,31 +9,18 @@ interface PredictionFormProps {
 }
 
 export function PredictionForm({ onSubmit, loading }: PredictionFormProps) {
-  const [ticker, setTicker] = useState('BBCA.JK')
-  const [date, setDate]     = useState('')
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    onSubmit({ ticker, date: date || undefined })
+    onSubmit({ ticker: 'GSPC' })
   }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <TickerSelector value={ticker} onChange={setTicker} />
-
       <div className="space-y-1.5">
-        <Label htmlFor="pred-date">Tanggal Prediksi</Label>
-        <Input
-          id="pred-date"
-          type="date"
-          value={date}
-          onChange={e => setDate(e.target.value)}
-          min={new Date().toISOString().split('T')[0]}
-          placeholder="Hari berikutnya (default)"
-          className="[color-scheme:dark]"
-        />
+        <Label>Ticker</Label>
+        <p className="text-sm font-medium">GSPC — S&P 500</p>
         <p className="text-xs text-[--color-muted-foreground]">
-          Kosongkan untuk prediksi hari kerja berikutnya.
+          Prediksi arah harga hari berikutnya.
         </p>
       </div>
 

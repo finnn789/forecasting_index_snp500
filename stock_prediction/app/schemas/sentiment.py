@@ -97,8 +97,8 @@ class DatasetSummary(BaseModel):
     date_start: str
     date_end: str
     span_days: int
-    missing_title: int
-    missing_cp: int
+    # missing_title: int
+    # missing_cp: int
     dtypes: dict[str, str]
 
 
@@ -209,3 +209,39 @@ class ModelStatusResponse(BaseModel):
     snapshot_path: str | None            # path snapshot aktif (jika HF cache format)
     required_files: dict[str, bool]      # config.json, pytorch_model.bin, tokenizer_config.json, vocab.txt
     model_size_mb: float | None          # total ukuran file di snapshot dir
+
+class RawStocksResponse(BaseModel):
+    """Skema baris tunggal dari file CSV stock data (GSPC_2018_2024.csv, dll)."""
+    date: str = Field(description="Tanggal data: YYYY-MM-DD")
+    open: float = Field(description="Harga pembukaan")
+    high: float = Field(description="Harga tertinggi")
+    low: float = Field(description="Harga terendah")
+    close: float = Field(description="Harga penutupan")
+    volume: int = Field(description="Volume transaksi")
+    daily_return: float | None = Field(None, description="Perubahan harian dalam persen")
+    hl_spread: float = Field(description="Selisih High - Low")
+    oc_spread: float = Field(description="Selisih Open - Close")
+    ma_20: float | None = Field(None, description="Moving Average 20 hari")
+    ma_50: float | None = Field(None, description="Moving Average 50 hari")
+    ma_200: float | None = Field(None, description="Moving Average 200 hari")
+    volatility_30: float | None = Field(None, description="Volatilitas 30 hari")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "date": "2018-01-02",
+                "open": 2683.73,
+                "high": 2695.89,
+                "low": 2682.36,
+                "close": 2695.81,
+                "volume": 3397430000,
+                "daily_return": None,
+                "hl_spread": 13.53,
+                "oc_spread": 12.08,
+                "ma_20": None,
+                "ma_50": None,
+                "ma_200": None,
+                "volatility_30": None,
+            }
+        }
+    }

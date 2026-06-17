@@ -154,22 +154,40 @@ class TestPredictionResult:
         p = PredictionResult(
             ticker="GSPC",
             target_date=date(2024, 3, 1),
-            predicted_close=5100.0,
-            sentiment_score=0.3,
-            confidence=0.75,
-            lstm_weight=0.7,
-            sentiment_weight=0.3,
+            direction="up",
+            probability_up=0.67,
+            confidence=0.67,
         )
-        assert p.confidence == 0.75
+        assert p.confidence == 0.67
+        assert p.direction == "up"
+        assert p.probability_up == 0.67
+
+    def test_valid_prediction_down(self):
+        p = PredictionResult(
+            ticker="GSPC",
+            target_date=date(2024, 3, 1),
+            direction="down",
+            probability_up=0.35,
+            confidence=0.65,
+        )
+        assert p.direction == "down"
 
     def test_prediction_confidence_out_of_range(self):
         with pytest.raises(ValidationError):
             PredictionResult(
                 ticker="GSPC",
                 target_date=date(2024, 3, 1),
-                predicted_close=5100.0,
-                sentiment_score=0.3,
+                direction="up",
+                probability_up=0.67,
                 confidence=1.5,  # > 1.0
-                lstm_weight=0.7,
-                sentiment_weight=0.3,
+            )
+
+    def test_prediction_probability_up_out_of_range(self):
+        with pytest.raises(ValidationError):
+            PredictionResult(
+                ticker="GSPC",
+                target_date=date(2024, 3, 1),
+                direction="up",
+                probability_up=1.2,  # > 1.0
+                confidence=1.0,
             )

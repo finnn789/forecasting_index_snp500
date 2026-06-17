@@ -1,8 +1,6 @@
 import {
-
   BarChart,
   Bar,
-  
   PieChart,
   Pie,
   XAxis,
@@ -17,6 +15,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { Skeleton } from '../components/ui/skeleton'
 import { ErrorAlert } from '../components/shared/ErrorAlert'
 import { useEdaDashboard } from '../hooks/useEdaDashboard'
+import { fmt } from '../lib/format'
 import type { SentimentDistributionItem } from '../types/eda'
 
 // Approximate hex values matching index.css oklch tokens
@@ -41,18 +40,14 @@ const axisProps = {
   axisLine: false as const,
 }
 
-// Safe number formatter — returns '—' when value is undefined/null/NaN
-const fmt = (n: number | null | undefined, decimals = 1): string =>
-  n != null && isFinite(n) ? n.toFixed(decimals) : '—'
-
-// Ensure chart data prop is always a real array (API shape may differ from types)
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const toArr = <T,>(v: T[] | null | undefined | any): T[] =>
+// Ensure chart data prop is always a real array
+const toArr = <T,>(v: T[] | null | undefined): T[] =>
   Array.isArray(v) ? v : []
 
 export function SentimentPage() {
   const { newsPerYear, newsPerDay, headlineLength, sentimentDist } = useEdaDashboard()
-  console.log('SentimentPage render:', { newsPerYear, newsPerDay, headlineLength, sentimentDist })
+  
+
   return (
     <PageContainer
       title="Eksplorasi Data (EDA)"
@@ -73,7 +68,7 @@ export function SentimentPage() {
               <ErrorAlert message={newsPerYear.error} />
             ) : (
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={toArr((newsPerYear.response as any)?.data ?? newsPerYear.response)} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <BarChart data={toArr(newsPerYear.data)} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={C.grid} />
                   <XAxis dataKey="year" {...axisProps} />
                   <YAxis {...axisProps} width={42} />
@@ -96,19 +91,19 @@ export function SentimentPage() {
               <Skeleton className="h-60 w-full" />
             ) : newsPerDay.error ? (
               <ErrorAlert message={newsPerDay.error} />
-            ) : newsPerDay.response ? (
+            ) : newsPerDay.data ? (
               <div className="grid grid-cols-3 gap-3">
                 {([
-                  { label: 'Rata-rata / hari', value: fmt(newsPerDay.response.mean), sub: null },
+                  { label: 'Rata-rata / hari', value: fmt(newsPerDay.data.mean), sub: null },
                   {
                     label: 'Maksimum',
-                    value: fmt((newsPerDay.response as any).max, 0),
-                    sub: (newsPerDay.response as any).max_date ?? null,
+                    value: fmt(newsPerDay.data.max, 0),
+                    sub: newsPerDay.data.max_date ?? null,
                   },
                   {
                     label: 'Minimum',
-                    value: fmt((newsPerDay.response as any).min, 0),
-                    sub: (newsPerDay.response as any).min_date ?? null,
+                    value: fmt(newsPerDay.data.min, 0),
+                    sub: newsPerDay.data.min_date ?? null,
                   },
                 ] as { label: string; value: string; sub: string | null }[]).map(({ label, value, sub }) => (
                   <div key={label} className="rounded-[--radius-md] bg-[--color-surface-2] p-3 text-center">
@@ -133,11 +128,11 @@ export function SentimentPage() {
               <Skeleton className="h-60 w-full" />
             ) : headlineLength.error ? (
               <ErrorAlert message={headlineLength.error} />
-            ) : headlineLength.response ? (
+            ) : headlineLength.data ? (
               <div className="space-y-3">
                 {([
-                  { heading: 'Karakter', mean: (headlineLength.response as any).char_mean, std: (headlineLength.response as any).char_std, min: (headlineLength.response as any).char_min, max: (headlineLength.response as any).char_max },
-                  { heading: 'Kata',     mean: (headlineLength.response as any).word_mean, std: (headlineLength.response as any).word_std, min: (headlineLength.response as any).word_min, max: (headlineLength.response as any).word_max },
+                  { heading: 'Karakter', mean: headlineLength.data.char_mean, std: headlineLength.data.char_std, min: headlineLength.data.char_min, max: headlineLength.data.char_max },
+                  { heading: 'Kata',     mean: headlineLength.data.word_mean, std: headlineLength.data.word_std, min: headlineLength.data.word_min, max: headlineLength.data.word_max },
                 ] as { heading: string; mean: number; std: number; min: number; max: number }[]).map(({ heading, mean, std, min, max }) => (
                   <div key={heading} className="rounded-[--radius-md] bg-[--color-surface-2] p-3">
                     <p className="mb-2 text-xs font-medium text-[--color-muted-foreground]">{heading}</p>
@@ -167,27 +162,27 @@ export function SentimentPage() {
               <Skeleton className="h-60 w-full" />
             ) : sentimentDist.error ? (
               <ErrorAlert message={sentimentDist.error} />
-            ) : sentimentDist.response ? (
+            ) : sentimentDist.data ? (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-[--radius-md] bg-[--color-surface-2] p-3 text-center">
                     <p className="text-xs text-[--color-muted-foreground]">Mean Score</p>
                     <p className="mt-1 text-xl font-semibold tabular-nums">
-                      {sentimentDist.response.sentiment_score_mean != null && sentimentDist.response.sentiment_score_mean >= 0 ? '+' : ''}
-                      {fmt(sentimentDist.response.sentiment_score_mean, 4)}
+                      {sentimentDist.data.sentiment_score_mean != null && sentimentDist.data.sentiment_score_mean >= 0 ? '+' : ''}
+                      {fmt(sentimentDist.data.sentiment_score_mean, 4)}
                     </p>
                   </div>
                   <div className="rounded-[--radius-md] bg-[--color-surface-2] p-3 text-center">
                     <p className="text-xs text-[--color-muted-foreground]">Std Score</p>
                     <p className="mt-1 text-xl font-semibold tabular-nums">
-                      {fmt(sentimentDist.response.sentiment_score_std, 4)}
+                      {fmt(sentimentDist.data.sentiment_score_std, 4)}
                     </p>
                   </div>
                 </div>
                 <ResponsiveContainer width="100%" height={180}>
                   <PieChart>
                     <Pie
-                      data={toArr<SentimentDistributionItem>(sentimentDist.response.data).map((item) => ({
+                      data={toArr<SentimentDistributionItem>(sentimentDist.data.data).map((item) => ({
                         name: item.label.charAt(0).toUpperCase() + item.label.slice(1),
                         value: item.pct,
                         fill: item.label === 'positive' ? C.pos : item.label === 'negative' ? C.neg : C.neu,

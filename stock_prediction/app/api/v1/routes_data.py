@@ -1,297 +1,186 @@
 """
-app/api/v1/routes_data.py — Endpoint EDA dan Feature Engineering.
+app/api/v1/routes_data.py — Route EDA.
 
-Semua endpoint membaca data yang sudah diproses (processed/) dan
-mengembalikan respons JSON — tidak ada gambar inline.
+Handler tipis: cukup return schema inner. Pembungkusan ke SuccessResponse
+ditangani otomatis oleh EnvelopeRoute (lihat app/core/envelope.py).
+Pesan per-endpoint didefinisikan via openapi_extra={"x-message": "..."}.
 """
 
-import logging
-from pathlib import Path
+from fastapi import APIRouter
 
-import pandas as pd
-from fastapi import APIRouter, HTTPException
-
-from app.schemas.base import SuccessResponse
+from app.core.envelope import EnvelopeRoute
 from app.schemas.sentiment import (
-    ColumnGroups,
-    DataInfo,
     DatasetSummary,
-    FeatureEngineeringResponse,
     HeadlineLengthStats,
     NewsPerDayStats,
-    NewsPerYearItem,
     NewsPerYearResponse,
-    SentimentDistributionItem,
+    ProcessedDataInfo,
+    RawStocksResponse,
     SentimentDistributionResponse,
 )
+from app.schemas.stocks import (
+    DailyReturnDistributionResponse,
+    DataInfoResponse,
+    DescriptiveStatsResponse,
+    DrawdownResponse,
+    SummaryStatsResponse,
+    TimeSeriesResponse,
+)
+from app.services import eda_service
 
-logger = logging.getLogger(__name__)
-router = APIRouter(tags=["Data & EDA"])
+router = APIRouter(tags=["Data & EDA"], route_class=EnvelopeRoute)
 
-# ---------------------------------------------------------------------------
-# Path konstanta
-# ---------------------------------------------------------------------------
-_SENTIMENT_DAILY = Path("data/processed/sentiment/headlines_daily_sentiment.csv")
-_HEADLINES_CLEAN = Path("data/processed/sentiment/headlines_clean.csv")
-_RAW_NEWS        = Path("data/raw/news/sp500_headlines_2008_2024.csv")
-
-
-def _load_daily(path: Path = _SENTIMENT_DAILY) -> pd.DataFrame:
-    if not path.exists():
-        raise HTTPException(
-            status_code=503,
-            detail=f"File belum tersedia: {path}. Jalankan pipeline preprocessing terlebih dahulu.",
-        )
-    return pd.read_csv(path, parse_dates=["Date"])
-
-
-def _load_clean(path: Path = _HEADLINES_CLEAN) -> pd.DataFrame:
-    if not path.exists():
-        raise HTTPException(
-            status_code=503,
-            detail=f"File belum tersedia: {path}. Jalankan pipeline preprocessing terlebih dahulu.",
-        )
-    return pd.read_csv(path, parse_dates=["Date"])
-
-
-# ---------------------------------------------------------------------------
-# EDA Endpoints
-# ---------------------------------------------------------------------------
 
 @router.get(
     "/data/eda/summary",
-    response_model=SuccessResponse[DatasetSummary],
+    response_model=DatasetSummary,
     summary="Statistik Dasar Dataset",
     description=(
         "Menampilkan statistik dasar dataset berita: jumlah baris, "
         "rentang tanggal, missing values, dan tipe data kolom."
     ),
+    openapi_extra={"x-message": "Ringkasan dataset berhasil dimuat"},
 )
-async def eda_summary() -> SuccessResponse[DatasetSummary]:
-    logger.info("[EDA] Memuat ringkasan dataset...")
-
-    df = _load_clean()
-    logger.info("[EDA] Dataset dimuat — %d baris", len(df))
-
-    summary = DatasetSummary(
-        total_rows=len(df),
-        date_start=str(df["Date"].min().date()),
-        date_end=str(df["Date"].max().date()),
-        span_days=int((df["Date"].max() - df["Date"].min()).days),
-        missing_title=int(df["title_clean"].isnull().sum()),
-        missing_cp=int(df["CP"].isnull().sum()),
-        dtypes={col: str(dtype) for col, dtype in df.dtypes.items()},
-    )
-
-    logger.info("[EDA] Ringkasan selesai — %d baris, rentang %s s/d %s",
-                summary.total_rows, summary.date_start, summary.date_end)
-    return SuccessResponse[DatasetSummary](data=summary, message="Ringkasan dataset berhasil dimuat")
+async def eda_summary() -> DatasetSummary:
+    return eda_service.get_dataset_summary()
 
 
 @router.get(
     "/data/eda/news-per-year",
-    response_model=SuccessResponse[NewsPerYearResponse],
+    response_model=NewsPerYearResponse,
     summary="Distribusi Berita per Tahun",
     description="Menghitung jumlah headline berita per tahun. Data siap digunakan sebagai bar chart.",
+    openapi_extra={"x-message": "Distribusi berita per tahun berhasil dimuat"},
 )
-async def eda_news_per_year() -> SuccessResponse[NewsPerYearResponse]:
-    logger.info("[EDA] Menghitung distribusi berita per tahun...")
-
-    df = _load_clean()
-    df["Year"] = df["Date"].dt.year
-    counts = df.groupby("Year").size().reset_index(name="count")
-
-    items = [NewsPerYearItem(year=int(r["Year"]), count=int(r["count"])) for _, r in counts.iterrows()]
-    logger.info("[EDA] Distribusi per tahun selesai — %d tahun", len(items))
-
-    result = NewsPerYearResponse(data=items, total=len(df))
-    return SuccessResponse[NewsPerYearResponse](data=result, message="Distribusi berita per tahun berhasil dimuat")
+async def eda_news_per_year() -> NewsPerYearResponse:
+    return eda_service.get_news_per_year()
 
 
 @router.get(
     "/data/eda/news-per-day",
-    response_model=SuccessResponse[NewsPerDayStats],
+    response_model=NewsPerDayStats,
     summary="Statistik Jumlah Berita per Hari",
     description="Statistik agregasi jumlah headline per hari (mean, max, min) beserta petunjuk visualisasi.",
+    openapi_extra={"x-message": "Statistik berita per hari berhasil dimuat"},
 )
-async def eda_news_per_day() -> SuccessResponse[NewsPerDayStats]:
-    logger.info("[EDA] Menghitung statistik berita per hari...")
-
-    df = _load_clean()
-    per_day = df.groupby("Date").size()
-
-    stats = NewsPerDayStats(
-        mean=round(float(per_day.mean()), 2),
-        max=int(per_day.max()),
-        max_date=str(per_day.idxmax().date()),
-        min=int(per_day.min()),
-        min_date=str(per_day.idxmin().date()),
-    )
-
-    logger.info("[EDA] Statistik per hari selesai — mean=%.2f, max=%d, min=%d",
-                stats.mean, stats.max, stats.min)
-    return SuccessResponse[NewsPerDayStats](data=stats, message="Statistik berita per hari berhasil dimuat")
+async def eda_news_per_day() -> NewsPerDayStats:
+    return eda_service.get_news_per_day()
 
 
 @router.get(
     "/data/eda/headline-length",
-    response_model=SuccessResponse[HeadlineLengthStats],
+    response_model=HeadlineLengthStats,
     summary="Distribusi Panjang Headline",
     description="Statistik panjang headline dalam karakter dan kata. Data siap digunakan sebagai histogram.",
+    openapi_extra={"x-message": "Statistik panjang headline berhasil dimuat"},
 )
-async def eda_headline_length() -> SuccessResponse[HeadlineLengthStats]:
-    logger.info("[EDA] Menghitung distribusi panjang headline...")
-
-    df = _load_clean()
-    df["len_char"] = df["title_clean"].str.len()
-    df["len_word"] = df["title_clean"].str.split().str.len()
-
-    stats = HeadlineLengthStats(
-        char_mean=round(float(df["len_char"].mean()), 2),
-        char_std=round(float(df["len_char"].std()), 2),
-        char_min=float(df["len_char"].min()),
-        char_max=float(df["len_char"].max()),
-        word_mean=round(float(df["len_word"].mean()), 2),
-        word_std=round(float(df["len_word"].std()), 2),
-        word_min=float(df["len_word"].min()),
-        word_max=float(df["len_word"].max()),
-    )
-
-    logger.info("[EDA] Panjang headline — char mean=%.2f, word mean=%.2f",
-                stats.char_mean, stats.word_mean)
-    return SuccessResponse[HeadlineLengthStats](data=stats, message="Statistik panjang headline berhasil dimuat")
+async def eda_headline_length() -> HeadlineLengthStats:
+    return eda_service.get_headline_length()
 
 
 @router.get(
     "/data/eda/sentiment-distribution",
-    response_model=SuccessResponse[SentimentDistributionResponse],
+    response_model=SentimentDistributionResponse,
     summary="Distribusi Label Sentimen",
     description=(
         "Menampilkan distribusi label sentimen (positive/negative/neutral) "
         "beserta statistik sentiment_score. Data siap digunakan sebagai bar chart."
     ),
+    openapi_extra={"x-message": "Distribusi label sentimen berhasil dimuat"},
 )
-async def eda_sentiment_distribution() -> SuccessResponse[SentimentDistributionResponse]:
-    logger.info("[EDA] Menghitung distribusi label sentimen...")
+async def eda_sentiment_distribution() -> SentimentDistributionResponse:
+    return eda_service.get_sentiment_distribution()
 
-    df = _load_clean()
-    counts = df["sentiment_label"].value_counts()
-    total = len(df)
-
-    items = [
-        SentimentDistributionItem(
-            label=label,
-            count=int(cnt),
-            pct=round(100 * cnt / total, 2),
-        )
-        for label, cnt in counts.items()
-    ]
-
-    result = SentimentDistributionResponse(
-        data=items,
-        sentiment_score_mean=round(float(df["sentiment_score"].mean()), 4),
-        sentiment_score_std=round(float(df["sentiment_score"].std()), 4),
-    )
-
-    logger.info("[EDA] Distribusi sentimen — %s",
-                {i.label: i.count for i in items})
-    return SuccessResponse[SentimentDistributionResponse](data=result, message="Distribusi label sentimen berhasil dimuat")
-
-
-# ---------------------------------------------------------------------------
-# Feature Engineering Endpoint
-# ---------------------------------------------------------------------------
 
 @router.get(
-    "/data/feature-engineering/run",
-    response_model=SuccessResponse[FeatureEngineeringResponse],
-    summary="Jalankan Feature Engineering (Sentimen)",
+    "/data/eda/stocks-info-response",
+    response_model=DataInfoResponse,
+    summary="Informasi File Processed",
     description=(
-        "Menjalankan feature extraction dari data sentimen harian yang sudah diproses. "
-        "Indikator teknikal (MACD, RSI, Bollinger Bands) TIDAK dihitung di sini — "
-        "endpoint ini hanya memproses fitur sentimen. "
-        "Data OHLCV asli diperlukan secara terpisah melalui stock_fetcher sebelum "
-        "compute_technical_indicators() dapat dipanggil."
+        "Daftar file CSV yang sudah diproses di data/processed/, beserta "
+        "metadata seperti jumlah baris, kolom, dan tipe data. Tidak ada eksekusi pipeline."
     ),
+    openapi_extra={"x-message": "Informasi file processed berhasil dimuat"},
 )
-async def run_feature_engineering(ticker: str = "^GSPC") -> SuccessResponse[FeatureEngineeringResponse]:
-    from pipeline.feature_engineering.sentiment_aggregator import (
-        extract_features,
-        get_feature_summary,
-        load_daily_sentiment,
-    )
+async def eda_stocks_info_response() -> DataInfoResponse:
+    return eda_service.get_stocks_overview()
 
-    logger.info("[FE] Memulai feature engineering sentimen untuk ticker: %s", ticker)
 
-    # 1. Muat data sentimen harian (output notebook 02)
-    logger.info("[FE] Langkah 1/2 — Memuat data sentimen harian...")
-    df_sentiment = load_daily_sentiment(_SENTIMENT_DAILY)
+@router.get(
+    "/data/eda/stocks/descriptive-stats",
+    response_model=DescriptiveStatsResponse,
+    summary="Statistik Deskriptif Saham",
+    description=(
+        "Statistik deskriptif OHLCV saham GSPC (min, max, mean, std, median, "
+        "skewness, kurtosis, kuartil) untuk tiap kolom harga dan volume."
+    ),
+    openapi_extra={"x-message": "Statistik deskriptif saham berhasil dimuat"},
+)
+async def eda_stocks_descriptive_stats() -> DescriptiveStatsResponse:
+    return eda_service.get_stocks_descriptive_stats()
 
-    # 2. Ekstraksi fitur dari data sentimen:
-    #    encode label, lag, rolling, target
-    #    Catatan: compute_technical_indicators() TIDAK dipanggil di sini karena
-    #    membutuhkan data OHLCV asli (Open/High/Low/Close/Volume) dari stock_fetcher.
-    logger.info("[FE] Langkah 2/2 — Ekstraksi fitur sentimen...")
-    df_feat = extract_features(
-        df_sentiment.rename(columns={"CP": "Close"}),
-        lag_cols=["Close", "sentiment_mean"],
-        lags=[1, 3, 5],
-        roll_windows=[3, 7],
-        target_horizon=1,
-        target_mode="return",
-    )
 
-    # 3. Kelompokkan kolom berdasarkan sumber
-    all_cols = df_feat.columns.tolist()
-    _OHLCV_COLS      = ["Date", "Open", "High", "Low", "Close", "Volume"]
-    _SENTIMENT_COLS  = ["headline_count", "sentiment_mean", "sentiment_pos",
-                        "sentiment_neg", "sentiment_neu", "sentiment_label",
-                        "sentiment_label_enc"]
-    _TECHNICAL_COLS  = ["ema_20", "ema_50", "rsi_14", "macd", "macd_signal",
-                        "macd_hist", "bb_mid", "bb_upper", "bb_lower",
-                        "bb_bandwidth", "daily_return", "volatility_20"]
+@router.get(
+    "/data/eda/stocks/time-series",
+    response_model=TimeSeriesResponse,
+    summary="Deret Waktu Harga & Volume",
+    description=(
+        "Deret waktu harga Close dan Volume saham GSPC, lengkap dengan anotasi "
+        "crash event (COVID 2020, bear market 2022). Siap untuk chart utama."
+    ),
+    openapi_extra={"x-message": "Deret waktu saham berhasil dimuat"},
+)
+async def eda_stocks_time_series() -> TimeSeriesResponse:
+    return eda_service.get_stocks_time_series()
 
-    col_groups = ColumnGroups(
-        ohlcv     =[c for c in _OHLCV_COLS     if c in all_cols],
-        sentiment =[c for c in _SENTIMENT_COLS  if c in all_cols],
-        technical =[c for c in _TECHNICAL_COLS  if c in all_cols],
-        lag       =[c for c in all_cols if "lag"  in c],
-        rolling   =[c for c in all_cols if "roll" in c],
-        target    =[c for c in all_cols if c == "target"],
-    )
 
-    # 4. Ringkasan
-    logger.info("[FE] Membuat ringkasan akhir...")
-    summary = get_feature_summary(df_feat)
+@router.get(
+    "/data/eda/stocks/daily-returns",
+    response_model=DailyReturnDistributionResponse,
+    summary="Distribusi Daily Return",
+    description=(
+        "Distribusi daily return saham GSPC: statistik agregat, deret waktu "
+        "return, dan breakdown statistik per tahun."
+    ),
+    openapi_extra={"x-message": "Distribusi daily return berhasil dimuat"},
+)
+async def eda_stocks_daily_returns() -> DailyReturnDistributionResponse:
+    return eda_service.get_stocks_daily_returns()
 
-    # 5. Sample rows — bersihkan tipe data agar JSON-serializable
-    records = []
-    for row in df_feat.head(5).to_dict(orient="records"):
-        cleaned = {}
-        for k, v in row.items():
-            if hasattr(v, "item"):
-                cleaned[k] = v.item()
-            elif isinstance(v, float) and v != v:
-                cleaned[k] = None
-            elif hasattr(v, "isoformat"):
-                cleaned[k] = str(v)
-            else:
-                cleaned[k] = v
-        records.append(cleaned)
 
-    logger.info("[FE] Feature engineering selesai — %d baris, %d kolom",
-                summary["total_rows"], summary["total_columns"])
+@router.get(
+    "/data/eda/stocks/drawdown",
+    response_model=DrawdownResponse,
+    summary="Cumulative Return & Drawdown",
+    description=(
+        "Cumulative return dan drawdown saham GSPC beserta metrik ringkas "
+        "(total return, max drawdown, annualized return & volatility)."
+    ),
+    openapi_extra={"x-message": "Data drawdown saham berhasil dimuat"},
+)
+async def eda_stocks_drawdown() -> DrawdownResponse:
+    return eda_service.get_stocks_drawdown()
 
-    result = FeatureEngineeringResponse(
-        status="success",
-        data_info=DataInfo(
-            total_rows=summary["total_rows"],
-            date_range=summary["date_range"],
-            column_groups=col_groups,
-            missing_values={k: int(v) for k, v in summary["missing_values"].items()},
-        ),
-        statistics=summary["statistics"],
-        sentiment_distribution={k: int(v) for k, v in summary["sentiment_distribution"].items()},
-        sample=records,
-    )
-    return SuccessResponse[FeatureEngineeringResponse](data=result, message="Feature engineering berhasil dijalankan")
+
+@router.get(
+    "/data/eda/stocks/summary",
+    response_model=SummaryStatsResponse,
+    summary="Ringkasan Performa Saham",
+    description=(
+        "Ringkasan akhir performa saham GSPC: overall & annualized return, "
+        "volatilitas, max drawdown, breakdown per tahun, dan key insights."
+    ),
+    openapi_extra={"x-message": "Ringkasan performa saham berhasil dimuat"},
+)
+async def eda_stocks_summary() -> SummaryStatsResponse:
+    return eda_service.get_stocks_summary()
+
+@router.get(
+    "/data/eda/stocks/raw",
+    response_model=list[RawStocksResponse],
+    summary="Raw Stock Data GSPC",
+    description="Seluruh baris data mentah saham GSPC dari file processed.",
+    openapi_extra={"x-message": "Raw stock data berhasil dimuat"},
+)
+async def stocks_raw_response() -> list[RawStocksResponse]:
+    return eda_service.get_raw_stocks()

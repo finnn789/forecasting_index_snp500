@@ -1,14 +1,32 @@
 import logging
 import math
 from collections.abc import Callable
+from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
+from transformers import AutoModelForSequenceClassification, BertTokenizer, pipeline
 
 logger = logging.getLogger(__name__)
 
 SENTIMENT_NUMERIC: dict[str, int] = {"positive": 1, "neutral": 0, "negative": -1}
+
+
+def _resolve_snapshot_path(model_path: str) -> str:
+    """
+    Resolve a HuggingFace cache directory (models--org--name format) to its
+    latest snapshot subdirectory. Returns the path unchanged if it is already
+    a direct model directory (contains config.json or vocab.txt at top level).
+    """
+    p = Path(model_path)
+    snapshots_dir = p / "snapshots"
+    if snapshots_dir.is_dir():
+        candidates = sorted(snapshots_dir.iterdir())
+        if candidates:
+            resolved = str(candidates[-1])
+            logger.info("Resolved HF cache path %s -> %s", model_path, resolved)
+            return resolved
+    return model_path
 
 
 class TextPreprocessor:
@@ -19,10 +37,10 @@ class TextPreprocessor:
         device: int = -1,
     ) -> None:
         """
-        model_path: path to local FinBERT snapshot directory
-        device: -1 for CPU, 0+ for GPU index
+        model_path: path to local FinBERT snapshot directory (or HF cache dir).
+        device: -1 for CPU, 0+ for GPU index.
         """
-        self._model_path = model_path
+        self._model_path = _resolve_snapshot_path(model_path)
         self._batch_size = batch_size
         self._device = device
         self._pipeline: Optional[object] = None
@@ -30,7 +48,9 @@ class TextPreprocessor:
     def _load_pipeline(self):
         if self._pipeline is None:
             logger.info("Loading FinBERT model from %s", self._model_path)
-            tokenizer = AutoTokenizer.from_pretrained(self._model_path, use_fast=False)
+            # BertTokenizer (slow) used directly — avoids AutoTokenizer fast-conversion
+            # which requires tokenizer.json or sentencepiece when absent from snapshot.
+            tokenizer = BertTokenizer.from_pretrained(self._model_path)
             model = AutoModelForSequenceClassification.from_pretrained(self._model_path)
             self._pipeline = pipeline(
                 "text-classification",
