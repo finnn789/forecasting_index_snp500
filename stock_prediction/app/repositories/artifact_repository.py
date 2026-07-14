@@ -36,5 +36,51 @@ class ArtifactRepository(FileBasedRepository):
             return []
         return [p.stem for p in sorted(self._lstm_dir.glob("*.pt"))]
 
+    # ------------------------------------------------------------------
+    # Metadata model (menutup bypass json.loads manual di service layer)
+    # ------------------------------------------------------------------
+    def metadata_path(self, filename: str = "metadata.json") -> Path:
+        return self._lstm_dir / filename
+
+    def load_metadata(self, filename: str = "metadata.json") -> dict:
+        import json
+        path = self.metadata_path(filename)
+        if not path.exists():
+            raise NotFoundError(
+                f"Metadata model tidak ditemukan: {path}",
+                code="METADATA_NOT_FOUND",
+            )
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def save_metadata(self, metadata: dict, filename: str = "metadata.json") -> Path:
+        import json
+        self._lstm_dir.mkdir(parents=True, exist_ok=True)
+        path = self.metadata_path(filename)
+        path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+        return path
+
+    # ------------------------------------------------------------------
+    # Scaler (joblib) — artefak pendamping model
+    # ------------------------------------------------------------------
+    def scaler_path(self, filename: str = "scaler.joblib") -> Path:
+        return self._lstm_dir / filename
+
+    def load_scaler(self, filename: str = "scaler.joblib"):
+        import joblib
+        path = self.scaler_path(filename)
+        if not path.exists():
+            raise NotFoundError(
+                f"Scaler tidak ditemukan: {path}",
+                code="SCALER_NOT_FOUND",
+            )
+        return joblib.load(path)
+
+    def save_scaler(self, scaler, filename: str = "scaler.joblib") -> Path:
+        import joblib
+        self._lstm_dir.mkdir(parents=True, exist_ok=True)
+        path = self.scaler_path(filename)
+        joblib.dump(scaler, path)
+        return path
+
     def finbert_local_dir(self) -> Path:
         return Path(settings.finbert_local_path)

@@ -12,6 +12,7 @@ Menyediakan:
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,9 +26,10 @@ logger = logging.getLogger(__name__)
 # Konstanta
 # ---------------------------------------------------------------------------
 
-STOCK_CSV     = "data/processed/stocks/GSPC_2018_2024.csv"
+STOCK_CSV     = "data/processed/stocks/GSPC_2008_2024.csv"
 SENTIMENT_CSV = "data/processed/sentiment/headlines_daily_sentiment.csv"
 FEATURE_COLS  = ["Open", "High", "Low", "Close", "Volume", "sentiment_mean"]
+OHLCV_FEATURE_COLS = ["Open", "High", "Low", "Close", "Volume"]
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +109,45 @@ def load_joined() -> pd.DataFrame:
 
     logger.info(
         "Joined dataset: %d rows (%s – %s)",
+        len(df),
+        df["Date"].min().date(),
+        df["Date"].max().date(),
+    )
+    return df
+
+
+# ---------------------------------------------------------------------------
+# load_ohlcv_only
+# ---------------------------------------------------------------------------
+
+def load_ohlcv_only() -> pd.DataFrame:
+    """
+    Load OHLCV saja dari STOCK_CSV, TANPA join ke data sentimen.
+
+    Dipakai untuk varian training "OHLCV-only" (ablation study — dibandingkan
+    dengan load_joined() yang menyertakan sentiment_mean, untuk mengukur
+    kontribusi fitur sentimen).
+
+    Returns
+    -------
+    DataFrame dengan kolom: Date + OHLCV_FEATURE_COLS
+    (Date adalah datetime64, baris sudah di-reset index)
+    """
+    root = Path(__file__).resolve().parents[2]  # project root
+    stock_path = root / STOCK_CSV
+
+    if not stock_path.exists():
+        raise FileNotFoundError(f"File OHLCV tidak ditemukan: {stock_path}")
+
+    df_stock = pd.read_csv(stock_path, parse_dates=["Date"])
+    df = df_stock[["Date"] + OHLCV_FEATURE_COLS].sort_values("Date").reset_index(drop=True)
+
+    missing = [c for c in OHLCV_FEATURE_COLS if c not in df.columns]
+    if missing:
+        raise ValueError(f"Kolom fitur tidak tersedia: {missing}")
+
+    logger.info(
+        "OHLCV-only dataset: %d rows (%s – %s)",
         len(df),
         df["Date"].min().date(),
         df["Date"].max().date(),
@@ -243,14 +284,21 @@ def build_dataset(
 def build_latest_window(
     window: int,
     scaler: MinMaxScaler,
+    *,
+    feature_cols: list[str] = FEATURE_COLS,
+    load_data_fn: Callable[[], pd.DataFrame] = load_joined,
 ) -> tuple[np.ndarray, str]:
     """
-    Untuk inference: ambil `window` baris TERAKHIR dari load_joined(),
-    transform dengan scaler, kembalikan (X[1,W,6] float32, as_of_date_iso).
+    Untuk inference: ambil `window` baris TERAKHIR dari load_data_fn(),
+    transform dengan scaler, kembalikan (X[1,W,n_features] float32, as_of_date_iso).
+
+    `feature_cols`/`load_data_fn` opsional (default = varian produksi FEATURE_COLS/
+    load_joined) — dipakai juga oleh varian notebook05 (OHLCV-only / OHLCV+sentimen)
+    lewat parameter berbeda, tanpa mengubah perilaku caller produksi.
 
     target_date = as_of_date + 1 hari kalender (string ISO).
     """
-    df = load_joined()
+    df = load_data_fn()
 
     if len(df) < window:
         raise ValueError(
@@ -258,7 +306,7 @@ def build_latest_window(
         )
 
     df_latest = df.iloc[-window:].reset_index(drop=True)
-    feat = scaler.transform(df_latest[FEATURE_COLS].values.astype(np.float64))
+    feat = scaler.transform(df_latest[feature_cols].values.astype(np.float64))
 
     X = feat[np.newaxis, :, :].astype(np.float32)   # (1, W, 6)
 

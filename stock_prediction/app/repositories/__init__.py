@@ -23,6 +23,14 @@ def get_default_repositories() -> dict:
     from app.core.settings import settings
 
     base = Path(".")
+
+    # Direktori artefak LSTM. `settings.lstm_model_path` secara historis kadang
+    # di-set ke sebuah nama file (mis. ".../lstm_model.h5", peninggalan era TF)
+    # padahal artefak PyTorch berada di direktori-nya. Normalisasi: jika path
+    # punya suffix file, pakai direktori induknya.
+    lstm_path = Path(settings.lstm_model_path)
+    lstm_dir = lstm_path.parent if lstm_path.suffix else lstm_path
+
     return {
         "stock": StockRepository(
             raw_dir=base / "data/raw/stocks",
@@ -37,7 +45,7 @@ def get_default_repositories() -> dict:
             processed_dir=base / "data/processed/sentiment",
         ),
         "artifact": ArtifactRepository(
-            lstm_dir=base / settings.lstm_model_path,
+            lstm_dir=base / lstm_dir,
             finbert_dir=base / settings.finbert_local_path,
         ),
     }

@@ -21,7 +21,7 @@ dependencies = [
     "seaborn>=0.13.2",
     "sentencepiece>=0.2.1",
     "ta>=0.11.0",
-    "torch>=2.2.0",
+    "torch>=2.2.0",        # uv akan otomatis mencari versi CUDA di indeks bawah jika tersedia
     "transformers>=4.38.0",
     "uvicorn[standard]>=0.29.0",
 ]
@@ -38,6 +38,19 @@ jupyter-notebook-eda = "scripts._jupyter:main"
 
 [tool.uv]
 package = true
+# Menambahkan konfigurasi mode copy agar tidak bentrok hardlink antar-drive C (cache) dan E (proyek)
+link-mode = "copy"
+
+# ================= TAMBAHKAN BAGIAN INI DI PALING BAWAH =================
+[[tool.uv.index]]
+name = "pytorch-cuda"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cuda" }
+torchvision = { index = "pytorch-cuda" }
+# ========================================================================
 
 [build-system]
 requires = ["setuptools>=68"]

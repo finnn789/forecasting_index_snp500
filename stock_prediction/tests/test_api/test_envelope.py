@@ -1,7 +1,7 @@
 """
 tests/test_api/test_envelope.py
 
-Integration test untuk 15 endpoint JSON dengan SuccessResponse envelope.
+Integration test untuk endpoint JSON dengan SuccessResponse envelope.
 Mengecek bahwa semua endpoint mengembalikan respons dengan struktur:
   - success: bool
   - data: T
@@ -144,67 +144,6 @@ class TestStatusEndpoints:
 
 
 # ---------------------------------------------------------------------------
-# Test: Data EDA Endpoints
-# ---------------------------------------------------------------------------
-
-class TestDataEdaEndpoints:
-    """Test /api/v1/data/eda/* endpoints"""
-
-    def test_eda_summary(self, client):
-        """GET /api/v1/data/eda/summary — DatasetSummary envelope"""
-        resp = client.get("/api/v1/data/eda/summary")
-
-        # Endpoint mungkin return 503 jika data tidak ada
-        if resp.status_code == 503:
-            body = assert_error_envelope(resp, expected_status=503)
-            assert body["error"]["code"], "error should have code"
-        else:
-            body = assert_success_envelope(resp, expected_status=200)
-            assert isinstance(body["data"], dict)
-
-    def test_eda_news_per_year(self, client):
-        """GET /api/v1/data/eda/news-per-year — NewsPerYearResponse envelope"""
-        resp = client.get("/api/v1/data/eda/news-per-year")
-
-        if resp.status_code == 503:
-            body = assert_error_envelope(resp, expected_status=503)
-        else:
-            body = assert_success_envelope(resp, expected_status=200)
-            assert isinstance(body["data"], dict)
-            assert "data" in body["data"], "response data should have 'data' key for items"
-
-    def test_eda_news_per_day(self, client):
-        """GET /api/v1/data/eda/news-per-day — NewsPerDayStats envelope"""
-        resp = client.get("/api/v1/data/eda/news-per-day")
-
-        if resp.status_code == 503:
-            body = assert_error_envelope(resp, expected_status=503)
-        else:
-            body = assert_success_envelope(resp, expected_status=200)
-            assert isinstance(body["data"], dict)
-
-    def test_eda_headline_length(self, client):
-        """GET /api/v1/data/eda/headline-length — HeadlineLengthStats envelope"""
-        resp = client.get("/api/v1/data/eda/headline-length")
-
-        if resp.status_code == 503:
-            body = assert_error_envelope(resp, expected_status=503)
-        else:
-            body = assert_success_envelope(resp, expected_status=200)
-            assert isinstance(body["data"], dict)
-
-    def test_eda_sentiment_distribution(self, client):
-        """GET /api/v1/data/eda/sentiment-distribution — SentimentDistributionResponse envelope"""
-        resp = client.get("/api/v1/data/eda/sentiment-distribution")
-
-        if resp.status_code == 503:
-            body = assert_error_envelope(resp, expected_status=503)
-        else:
-            body = assert_success_envelope(resp, expected_status=200)
-            assert isinstance(body["data"], dict)
-
-
-# ---------------------------------------------------------------------------
 # Test: Sentiment Pipeline Endpoints
 # ---------------------------------------------------------------------------
 
@@ -237,57 +176,63 @@ class TestSentimentEndpoints:
 
 
 # ---------------------------------------------------------------------------
-# Test: Feature Engineering Endpoints (read-only metadata)
+# Test: Data Analysis Endpoints (notebooks/01_EDA_stock_data.ipynb & 02_EDA_sentiment_data.ipynb)
 # ---------------------------------------------------------------------------
 
-class TestFeatureEngineeringEndpoints:
-    """Test /api/v1/feature-engineering/* endpoints"""
+STOCK_ANALYSIS_ENDPOINTS = [
+    "/api/v1/data-analysis/stocks/raw-info",
+    "/api/v1/data-analysis/stocks/descriptive-stats",
+    "/api/v1/data-analysis/stocks/price-volume",
+    "/api/v1/data-analysis/stocks/daily-returns",
+    "/api/v1/data-analysis/stocks/rolling-stats",
+    "/api/v1/data-analysis/stocks/ohlc-spread",
+    "/api/v1/data-analysis/stocks/correlation",
+    "/api/v1/data-analysis/stocks/seasonality",
+    "/api/v1/data-analysis/stocks/cumulative-return-drawdown",
+    "/api/v1/data-analysis/stocks/summary",
+    "/api/v1/data-analysis/stocks/preprocessing",
+    "/api/v1/data-analysis/combined/pipeline-steps",
+]
 
-    def test_fe_info(self, client):
-        """GET /api/v1/feature-engineering/info — ProcessedDataInfo envelope"""
-        resp = client.get("/api/v1/feature-engineering/info")
+SENTIMENT_RAW_ANALYSIS_ENDPOINTS = [
+    "/api/v1/data-analysis/sentiment/raw-info",
+    "/api/v1/data-analysis/sentiment/news-per-year",
+    "/api/v1/data-analysis/sentiment/news-per-day",
+    "/api/v1/data-analysis/sentiment/headline-length",
+    "/api/v1/data-analysis/sentiment/closing-price",
+    "/api/v1/data-analysis/sentiment/preprocessing",
+]
 
-        if resp.status_code == 503:
-            body = assert_error_envelope(resp, expected_status=503)
-        else:
-            body = assert_success_envelope(resp, expected_status=200)
-            assert isinstance(body["data"], dict)
+# Butuh data/processed/sentiment/headlines_clean.csv (hasil pipeline FinBERT) — bisa 404
+# di lingkungan yang belum pernah menjalankan POST /sentiment/pipeline/run.
+SENTIMENT_SCORED_ANALYSIS_ENDPOINTS = [
+    "/api/v1/data-analysis/sentiment/scoring-distribution",
+    "/api/v1/data-analysis/sentiment/daily-aggregation",
+    "/api/v1/data-analysis/sentiment/method-comparison",
+]
 
-    def test_fe_columns(self, client):
-        """GET /api/v1/feature-engineering/columns — ColumnInfoResponse envelope"""
-        # Endpoint wajib ada query params: source & file
-        # Coba akses dengan parameter minimal
-        resp = client.get(
-            "/api/v1/feature-engineering/columns",
-            params={"source": "sentiment", "file": "headlines_daily_sentiment"}
-        )
+
+class TestDataAnalysisEndpoints:
+    """Test /api/v1/data-analysis/* endpoints"""
+
+    @pytest.mark.parametrize("endpoint", STOCK_ANALYSIS_ENDPOINTS)
+    def test_stock_analysis_endpoint(self, client, endpoint):
+        resp = client.get(endpoint)
+        body = assert_success_envelope(resp, expected_status=200)
+        assert isinstance(body["data"], dict)
+
+    @pytest.mark.parametrize("endpoint", SENTIMENT_RAW_ANALYSIS_ENDPOINTS)
+    def test_sentiment_raw_analysis_endpoint(self, client, endpoint):
+        resp = client.get(endpoint)
+        body = assert_success_envelope(resp, expected_status=200)
+        assert isinstance(body["data"], dict)
+
+    @pytest.mark.parametrize("endpoint", SENTIMENT_SCORED_ANALYSIS_ENDPOINTS)
+    def test_sentiment_scored_analysis_endpoint(self, client, endpoint):
+        resp = client.get(endpoint)
 
         if resp.status_code == 404:
-            # File tidak ditemukan
             body = assert_error_envelope(resp, expected_status=404)
-        elif resp.status_code == 400:
-            # Query param tidak valid
-            body = assert_error_envelope(resp, expected_status=400)
-        else:
-            body = assert_success_envelope(resp, expected_status=200)
-            assert isinstance(body["data"], dict)
-
-    def test_fe_preview(self, client):
-        """GET /api/v1/feature-engineering/preview — PreviewResponse envelope"""
-        # Endpoint wajib ada query params: source & file
-        resp = client.get(
-            "/api/v1/feature-engineering/preview",
-            params={
-                "source": "sentiment",
-                "file": "headlines_daily_sentiment",
-                "n": 5
-            }
-        )
-
-        if resp.status_code == 404:
-            body = assert_error_envelope(resp, expected_status=404)
-        elif resp.status_code == 400:
-            body = assert_error_envelope(resp, expected_status=400)
         else:
             body = assert_success_envelope(resp, expected_status=200)
             assert isinstance(body["data"], dict)

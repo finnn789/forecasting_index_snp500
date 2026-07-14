@@ -34,7 +34,7 @@ class TextPreprocessor:
         self,
         model_path: str,
         batch_size: int = 32,
-        device: int = -1,
+        device: int = 0,
     ) -> None:
         """
         model_path: path to local FinBERT snapshot directory (or HF cache dir).

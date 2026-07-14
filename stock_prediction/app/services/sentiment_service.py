@@ -14,6 +14,7 @@ from pipeline.preprocessing.text_preprocessor import TextPreprocessor
 from app.core.exceptions import NotFoundError
 from app.repositories import NewsRepository, SentimentRepository
 from app.repositories.provider import get_repositories
+from app.schemas.sentiment import PreviewResponse
 
 load_dotenv()
 
@@ -42,20 +43,19 @@ def _resolve_model_path() -> str:
     return raw
 
 
+# Path artefak sentiment kini bersumber tunggal dari repository (lihat
+# app/repositories/) — bukan lagi dari os.environ, agar konsisten dengan
+# layer akses data lain. Default repository == nilai .env.example.
 def _raw_csv() -> Path:
-    return Path(os.environ["RAW_NEWS_CSV"])
-
-
-def _processed_dir() -> Path:
-    return Path(os.environ["SENTIMENT_PROCESSED_DIR"])
+    return get_repositories()["news"].raw_headlines_path()
 
 
 def _clean_csv() -> Path:
-    return _processed_dir() / "headlines_clean.csv"
+    return get_repositories()["news"].clean_headlines_path()
 
 
 def _daily_csv() -> Path:
-    return _processed_dir() / "headlines_daily_sentiment.csv"
+    return get_repositories()["sentiment"].daily_sentiment_path()
 
 
 def run_preprocessing_pipeline_stream(
@@ -155,12 +155,9 @@ def run_preprocessing_pipeline_stream(
 
         emit({"step": "saving", "pct": 95, "msg": "Menyimpan file output..."})
         try:
-            processed_dir = _processed_dir()
-            clean_csv = _clean_csv()
-            daily_csv = _daily_csv()
-            processed_dir.mkdir(parents=True, exist_ok=True)
-            df_clean.to_csv(clean_csv, index=False)
-            df_daily.to_csv(daily_csv, index=False)
+            repos = get_repositories()
+            clean_csv = repos["news"].save_clean_headlines(df_clean)
+            daily_csv = repos["sentiment"].save_daily_sentiment(df_daily)
         except OSError as e:
             emit({"step": "error", "pct": 95, "msg": f"Gagal menyimpan file: {e}"})
             return
@@ -257,7 +254,14 @@ def get_pipeline_status() -> dict:
     }
 
 
-def get_daily_preview(page: int = 1, page_size: int = 20) -> dict:
+def get_daily_preview(page: int = 1, page_size: int = 20) -> PreviewResponse:
+    """
+    Kembalikan halaman dari `headlines_daily_sentiment.csv` (output pipeline sentimen).
+
+    Berbeda dengan `/feature-engineering/preview` (generic, N baris pertama dari
+    file apa saja di data/processed/): endpoint ini khusus hasil pipeline sentimen
+    dan mendukung pagination (`page`/`page_size`) alih-alih N baris pertama.
+    """
     repos = get_repositories()
     sentiment_repo: SentimentRepository = repos["sentiment"]
 
@@ -277,13 +281,13 @@ def get_daily_preview(page: int = 1, page_size: int = 20) -> dict:
     end = start + page_size
     rows = df.iloc[start:end].to_dict(orient="records")
 
-    return {
-        "total_rows": total_rows,
-        "page": page,
-        "page_size": page_size,
-        "columns": list(df.columns),
-        "rows": rows,
-    }
+    return PreviewResponse(
+        source="sentiment",
+        filename="headlines_daily_sentiment.csv",
+        total_rows=total_rows,
+        columns=list(df.columns),
+        rows=rows,
+    )
 
 
 def get_model_status() -> dict:

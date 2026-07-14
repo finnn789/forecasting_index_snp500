@@ -15,6 +15,12 @@ class SentimentRepository(FileBasedRepository):
         super().__init__(raw_dir)
         self._processed_dir = Path(processed_dir)
 
+    def daily_sentiment_path(self) -> Path:
+        return self._processed_dir / _DAILY_SENTIMENT_FILENAME
+
+    def daily_count_path(self) -> Path:
+        return self._processed_dir / _DAILY_COUNT_FILENAME
+
     def load_daily_sentiment(self, date_range: DateRange | None = None) -> pd.DataFrame:
         path = self._processed_dir / _DAILY_SENTIMENT_FILENAME
         if not path.exists():

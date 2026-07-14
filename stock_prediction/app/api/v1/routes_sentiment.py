@@ -60,12 +60,16 @@ def pipeline_status() -> PipelineStatusResponse:
     openapi_extra={"x-message": "Preview data sentimen berhasil dimuat"},
 )
 def data_preview(page: int = 1, page_size: int = 20) -> PreviewResponse:
-    result = sentiment_service.get_daily_preview(page=page, page_size=page_size)
-    return PreviewResponse(
-        source="sentiment",
-        filename="headlines_daily_sentiment.csv",
-        **result,
-    )
+    """
+    Preview berpaginasi khusus output pipeline sentimen
+    (`headlines_daily_sentiment.csv`).
+
+    Berbeda dengan `/feature-engineering/preview` yang generic untuk file
+    apa saja di data/processed/ (param `source`+`file`, N baris pertama tanpa
+    paginasi) — endpoint ini spesifik untuk hasil sentiment pipeline dan
+    mendukung `page`/`page_size`.
+    """
+    return sentiment_service.get_daily_preview(page=page, page_size=page_size)
 
 
 @router.get(

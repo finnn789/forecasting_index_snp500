@@ -16,6 +16,12 @@ class NewsRepository(FileBasedRepository):
         self._raw_dir = Path(raw_dir)
         self._processed_dir = Path(processed_dir)
 
+    def raw_headlines_path(self) -> Path:
+        return self._raw_dir / _RAW_FILENAME
+
+    def clean_headlines_path(self) -> Path:
+        return self._processed_dir / _CLEAN_FILENAME
+
     def load_raw_headlines(self, date_range: DateRange | None = None) -> pd.DataFrame:
         path = self._raw_dir / _RAW_FILENAME
         if not path.exists():

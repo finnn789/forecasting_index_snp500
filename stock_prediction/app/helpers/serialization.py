@@ -1,6 +1,19 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pandas as pd
+
+ISO_DATE_FORMAT = "%Y-%m-%d"
+
+
+def format_iso_date(value: Any) -> str:
+    """Format sebuah date/Timestamp ke string ISO 'YYYY-MM-DD'.
+
+    Menyatukan pemformatan tanggal yang sebelumnya diulang via
+    `.strftime("%Y-%m-%d")` di banyak service.
+    """
+    return value.strftime(ISO_DATE_FORMAT)
 
 
 def to_json_safe_record(record: dict) -> dict:

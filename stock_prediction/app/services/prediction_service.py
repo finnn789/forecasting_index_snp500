@@ -7,10 +7,11 @@ di-import saat module load — verifikasi route tetap jalan walau model belum ad
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from app.core.exceptions import NotFoundError
+from app.helpers.serialization import format_iso_date
+from app.repositories.provider import get_repositories
 from app.schemas.prediction import (
     BacktestPoint,
     BacktestResponse,
@@ -20,7 +21,6 @@ from app.schemas.prediction import (
 )
 
 _ARTIFACT_DIR = Path("data/artifacts/lstm_weights")
-_METADATA_FILE = _ARTIFACT_DIR / "metadata.json"
 
 
 def get_model_status() -> ModelInfoResponse:
@@ -30,15 +30,16 @@ def get_model_status() -> ModelInfoResponse:
     Jika tidak ada → is_available=False, artifact_path saja.
     """
     artifact_path = str(_ARTIFACT_DIR)
+    artifact_repo = get_repositories()["artifact"]
 
-    if not _METADATA_FILE.exists():
+    if not artifact_repo.metadata_path().exists():
         return ModelInfoResponse(
             is_available=False,
             artifact_path=artifact_path,
         )
 
     try:
-        meta = json.loads(_METADATA_FILE.read_text())
+        meta = artifact_repo.load_metadata()
     except Exception:
         return ModelInfoResponse(
             is_available=False,
@@ -85,9 +86,10 @@ def predict_direction(ticker: str = "GSPC") -> DirectionPredictionResponse:
     features_used: list[str] = []
     trained_at: str | None = None
 
-    if _METADATA_FILE.exists():
+    artifact_repo = get_repositories()["artifact"]
+    if artifact_repo.metadata_path().exists():
         try:
-            meta = json.loads(_METADATA_FILE.read_text())
+            meta = artifact_repo.load_metadata()
             window = meta.get("window", 20)
             features_used = meta.get("feature_cols", [])
             trained_at = meta.get("trained_at")
@@ -155,7 +157,7 @@ def run_backtest(split: str = "test") -> BacktestResponse:
         )
 
     # Baca window dari metadata
-    meta = json.loads(_METADATA_FILE.read_text())
+    meta = get_repositories()["artifact"].load_metadata()
     window: int = meta.get("window", 20)
     ticker = "GSPC"
 
@@ -195,7 +197,7 @@ def run_backtest(split: str = "test") -> BacktestResponse:
     # Buat peta Date → Close dari joined dataframe
     df_joined = load_joined()
     date_to_close: dict[str, float] = {
-        row["Date"].strftime("%Y-%m-%d"): float(row["Close"])
+        format_iso_date(row["Date"]): float(row["Close"])
         for _, row in df_joined.iterrows()
     }
 
