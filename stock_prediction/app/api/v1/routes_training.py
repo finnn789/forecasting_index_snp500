@@ -1,11 +1,11 @@
 """
-app/api/v1/routes_training.py — Endpoint "API Training Live Notebook 05".
+app/api/v1/routes_training.py — Endpoint "Random Search Skripsi-Scoped"
+(notebook 07, Batasan Masalah BAB I skripsi).
 
-Expose training FINAL model LSTM (metodologi notebook 05) sebagai API
-live-streamed (SSE), plus endpoint hasil grid-search STATIS (144 kombinasi,
-tidak dijalankan ulang). Juga expose varian OHLCV-only (ablation study —
-tanpa sentiment_mean, lihat `train_notebook05_ohlcv`). Artefak & kelas
-TERISOLASI dari produksi — lihat models/lstm/notebook05_common.py.
+Expose Random Search LIVE (SSE) untuk Model A (LSTM-OHLCV baseline) & Model B
+(FinBERT-LSTM), plus endpoint hasil training tersimpan + prediksi + backtest
+per varian. Artefak & kelas TERISOLASI dari produksi — lihat
+models/lstm/notebook07_common.py.
 """
 
 from __future__ import annotations
@@ -18,168 +18,16 @@ from fastapi.responses import StreamingResponse
 from app.core.envelope import EnvelopeRoute
 from app.helpers.sse import sse_response
 from app.schemas.training import (
-    GridSearchResultResponse,
-    Notebook05BacktestResponse,
-    Notebook05PredictionResponse,
-    Notebook05ResultResponse,
+    ManualTrainRequest,
     Notebook07BacktestResponse,
     Notebook07PredictionResponse,
     Notebook07ResultResponse,
     SearchSpaceResponse,
     SkripsiTrainRequest,
-    TrainRequest,
 )
 from app.services import training_service
 
 router = APIRouter(tags=["Model Training"], route_class=EnvelopeRoute)
-
-
-@router.post(
-    "/train/notebook05",
-    summary="Training final LSTM (Server-Sent Events) — metodologi notebook 05",
-    response_description="Stream SSE: type start/epoch/done/error",
-)
-async def train_notebook05(req: TrainRequest | None = None) -> StreamingResponse:
-    """
-    Jalankan training final `LSTMSoftmaxClassifier` (replikasi metodologi
-    notebook 05, varian OHLCV+sentiment_mean) dan stream progress secara
-    real-time via Server-Sent Events (text/event-stream).
-
-    Model ini diketahui KOLAPS KELAS ("selalu menebak Up") — diagnosis
-    class-collapse dihitung & dikembalikan apa adanya di event "done".
-
-    Artefak disimpan TERISOLASI (`lstm_nb05_*`) — TIDAK menimpa artefak
-    produksi (`direction_classifier.pt`/`scaler.joblib`/`metadata.json`).
-
-    Setiap event adalah JSON satu baris:
-    ```
-    data: {"type": "start", ...}
-    data: {"type": "epoch", ...}
-    data: {"type": "done", ...}
-    ```
-    atau `{"type": "error", "message": "..."}` bila gagal.
-    """
-    body = req or TrainRequest()
-
-    def work(emit: Callable[[dict], None]) -> None:
-        training_service.run_training_stream(body, emit=emit)
-
-    return sse_response(work)
-
-
-@router.post(
-    "/train/notebook05/ohlcv",
-    summary="Training final LSTM (SSE) — varian OHLCV-only (ablation study)",
-    response_description="Stream SSE: type start/epoch/done/error",
-)
-async def train_notebook05_ohlcv(req: TrainRequest | None = None) -> StreamingResponse:
-    """
-    Varian OHLCV-only (ablation study) dari training final `LSTMSoftmaxClassifier`
-    — HANYA 5 fitur (Open, High, Low, Close, Volume), TANPA `sentiment_mean`.
-
-    Hyperparameter default me-reuse `best_config` hasil grid-search 144
-    kombinasi notebook 05 (varian sentimen) — grid-search 5-fitur ini sendiri
-    TIDAK pernah dijalankan ulang. Tujuannya adalah ablation study terkontrol:
-    satu-satunya variabel yang beda dari `POST /train/notebook05` adalah
-    ada/tidaknya fitur `sentiment_mean`, untuk mengukur kontribusi nyatanya.
-
-    Artefak disimpan TERISOLASI (`lstm_nb05_ohlcv_*`) — TIDAK menimpa artefak
-    produksi maupun artefak varian sentimen (`lstm_nb05_*`).
-
-    Event SSE identik dengan `POST /train/notebook05`:
-    ```
-    data: {"type": "start", ...}
-    data: {"type": "epoch", ...}
-    data: {"type": "done", ...}
-    ```
-    atau `{"type": "error", "message": "..."}` bila gagal.
-    """
-    body = req or TrainRequest()
-
-    def work(emit: Callable[[dict], None]) -> None:
-        training_service.run_training_stream_ohlcv(body, emit=emit)
-
-    return sse_response(work)
-
-
-@router.get(
-    "/train/notebook05/grid-search-result",
-    response_model=GridSearchResultResponse,
-    openapi_extra={"x-message": "Hasil grid-search notebook 05 berhasil dimuat"},
-)
-def grid_search_result() -> GridSearchResultResponse:
-    """Hasil grid-search 144 kombinasi (STATIS, hardcode dari notebook 05 —
-    TIDAK dijalankan ulang)."""
-    return training_service.get_grid_search_result()
-
-
-# ---------------------------------------------------------------------------
-# Halaman Prediction — hasil training notebook05 (persisted) + prediksi +
-# backtest, per varian (sentimen/ohlcv). Sumber data pindah ke backend supaya
-# tidak hilang saat React unmount (beda dari live SSE training di atas).
-# ---------------------------------------------------------------------------
-
-@router.get(
-    "/train/notebook05/result",
-    response_model=Notebook05ResultResponse,
-    openapi_extra={"x-message": "Hasil training notebook05 (sentimen) berhasil dimuat"},
-)
-def notebook05_result() -> Notebook05ResultResponse:
-    """Hasil training terakhir varian OHLCV+sentimen (persisted di metadata.json).
-    `is_available=False` (bukan 404) kalau belum pernah training."""
-    return training_service.get_notebook05_result("sentiment")
-
-
-@router.get(
-    "/train/notebook05/ohlcv/result",
-    response_model=Notebook05ResultResponse,
-    openapi_extra={"x-message": "Hasil training notebook05 (OHLCV-only) berhasil dimuat"},
-)
-def notebook05_ohlcv_result() -> Notebook05ResultResponse:
-    """Varian OHLCV-only dari `GET /train/notebook05/result`."""
-    return training_service.get_notebook05_result("ohlcv")
-
-
-@router.post(
-    "/train/notebook05/predict",
-    response_model=Notebook05PredictionResponse,
-    openapi_extra={"x-message": "Prediksi notebook05 (sentimen) berhasil dijalankan"},
-)
-def notebook05_predict() -> Notebook05PredictionResponse:
-    """Prediksi arah harga hari berikutnya, varian OHLCV+sentimen, memakai
-    model terlatih tersimpan (`lstm_nb05_best.pt`)."""
-    return training_service.predict_notebook05("sentiment")
-
-
-@router.post(
-    "/train/notebook05/ohlcv/predict",
-    response_model=Notebook05PredictionResponse,
-    openapi_extra={"x-message": "Prediksi notebook05 (OHLCV-only) berhasil dijalankan"},
-)
-def notebook05_ohlcv_predict() -> Notebook05PredictionResponse:
-    """Varian OHLCV-only dari `POST /train/notebook05/predict`."""
-    return training_service.predict_notebook05("ohlcv")
-
-
-@router.get(
-    "/train/notebook05/backtest",
-    response_model=Notebook05BacktestResponse,
-    openapi_extra={"x-message": "Backtest notebook05 (sentimen) berhasil dijalankan"},
-)
-def notebook05_backtest(split: str = "test") -> Notebook05BacktestResponse:
-    """Backtest model notebook05 terlatih (varian OHLCV+sentimen) pada split
-    historis (default 'test')."""
-    return training_service.backtest_notebook05("sentiment", split=split)
-
-
-@router.get(
-    "/train/notebook05/ohlcv/backtest",
-    response_model=Notebook05BacktestResponse,
-    openapi_extra={"x-message": "Backtest notebook05 (OHLCV-only) berhasil dijalankan"},
-)
-def notebook05_ohlcv_backtest(split: str = "test") -> Notebook05BacktestResponse:
-    """Varian OHLCV-only dari `GET /train/notebook05/backtest`."""
-    return training_service.backtest_notebook05("ohlcv", split=split)
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +106,51 @@ async def train_skripsi_finbert(req: SkripsiTrainRequest | None = None) -> Strea
 
     def work(emit: Callable[[dict], None]) -> None:
         training_service.run_skripsi_finbert_stream(body, emit=emit)
+
+    return sse_response(work)
+
+
+@router.post(
+    "/train/skripsi/ohlcv/manual",
+    summary="Training Manual LSTM-OHLCV baseline (SSE) — Model A, 1 konfigurasi fixed",
+    response_description="Stream SSE: type start/epoch/done/error",
+)
+async def train_skripsi_baseline_manual(req: ManualTrainRequest) -> StreamingResponse:
+    """
+    Latih **Model A — LSTM-OHLCV baseline** dengan 1 konfigurasi hyperparameter
+    yang dikirim FE (input manual bebas, ATAU prefill dari `best_config` hasil
+    `POST /train/skripsi/ohlcv`) — BUKAN Random Search, tidak ada sampling/seleksi.
+
+    Event SSE flat (2 level, beda dari Random Search yang 3 level):
+    ```
+    data: {"type": "start", "config": {...}, ...}
+    data: {"type": "epoch", "epoch": 1, "total_epochs": 30, ...}
+    data: {"type": "done", "config": {...}, "final_val_f1": ..., "metrics": {...}, ...}
+    ```
+    atau `{"type": "error", "message": "..."}` bila gagal.
+
+    **PENTING:** artefak disimpan ke nama file YANG SAMA dengan Random Search
+    (`lstm_baseline_skripsi.*`) — training manual MENIMPA model resmi Model A,
+    sehingga halaman Prediction (`.../result`, `.../predict`, `.../backtest`)
+    otomatis merefleksikan model manual yang baru dilatih.
+    """
+    def work(emit: Callable[[dict], None]) -> None:
+        training_service.run_skripsi_baseline_manual_stream(req, emit=emit)
+
+    return sse_response(work)
+
+
+@router.post(
+    "/train/skripsi/finbert-lstm/manual",
+    summary="Training Manual FinBERT-LSTM (SSE) — Model B, 1 konfigurasi fixed",
+    response_description="Stream SSE: type start/epoch/done/error",
+)
+async def train_skripsi_finbert_manual(req: ManualTrainRequest) -> StreamingResponse:
+    """Varian **Model B — FinBERT-LSTM** dari `POST /train/skripsi/ohlcv/manual`.
+    Identik di semua aspek lain — hanya beda fitur (+`sentiment_mean`). Artefak
+    disimpan ke `finbert_lstm_skripsi.*` (menimpa model resmi Model B)."""
+    def work(emit: Callable[[dict], None]) -> None:
+        training_service.run_skripsi_finbert_manual_stream(req, emit=emit)
 
     return sse_response(work)
 

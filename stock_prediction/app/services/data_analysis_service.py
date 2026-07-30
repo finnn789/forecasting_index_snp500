@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, ValidationError
 from app.domain.value_objects import TickerSymbol
 from app.helpers.serialization import format_iso_date
 from app.repositories.provider import get_repositories
@@ -26,11 +26,13 @@ from app.schemas.data_analysis import (
     AnnualReturn,
     ClosingPricePoint,
     ColumnStats,
-    CombinedMergeInfo,
     CombinedMergePreviewResponse,
     CombinedPipelineStepsResponse,
+    CombinedScaledPreviewResponse,
     CrashEvent,
     DailySentimentPoint,
+    DatasetBuildResponse,
+    DatasetStatusResponse,
     DrawdownPoint,
     Histogram,
     MethodComparisonPoint,
@@ -43,6 +45,7 @@ from app.schemas.data_analysis import (
     ReturnPoint,
     RollingStatPoint,
     SeasonalReturn,
+    SentimentCleanPreviewResponse,
     SentimentClosingPriceResponse,
     SentimentDailyAggregationResponse,
     SentimentHeadlineLengthResponse,
@@ -68,7 +71,12 @@ from app.schemas.data_analysis import (
     StockSummaryResponse,
     YearlyReturnBox,
 )
-from pipeline.feature_engineering.dataset_builder import FEATURE_COLS
+from pipeline.feature_engineering.dataset_builder import (
+    RETURN_FEATURE_COLS_A,
+    RETURN_FEATURE_COLS_B,
+    load_joined,
+    load_return_features,
+)
 from pipeline.preprocessing.stock_preprocessor import StockPreprocessor
 
 _TICKER = TickerSymbol(symbol="GSPC")
@@ -434,6 +442,15 @@ def get_sentiment_raw_preview(n: int = 10) -> SentimentRawPreviewResponse:
     )
 
 
+def get_sentiment_clean_preview(n: int = 10) -> SentimentCleanPreviewResponse:
+    df = get_repositories()["news"].load_clean_headlines()
+    return SentimentCleanPreviewResponse(
+        columns=df.columns.tolist(),
+        n=min(n, len(df)),
+        rows=_preview_rows(df, n),
+    )
+
+
 def get_news_per_year() -> SentimentNewsPerYearResponse:
     df = _load_raw_news_with_cp()
     year_counts = df.groupby(df["Date"].dt.year).size()
@@ -592,58 +609,89 @@ def get_method_comparison() -> SentimentMethodComparisonResponse:
 
 
 # ---------------------------------------------------------------------------
-# Combined — OHLCV + sentiment_mean (mirrors dataset_builder.py::load_joined())
+# Combined — fitur return OHLCV + sentiment_mean. Mirror PERSIS
+# dataset_builder.py::load_return_features() + notebook07_common.py::
+# load_split_capped() — fungsi ASLI yang dipakai training_service.py untuk
+# training sungguhan (horizon=5, split kronologis persentase, capping outlier
+# IQR fit-train-only) — BUKAN reimplementasi/simulasi terpisah.
 # ---------------------------------------------------------------------------
 
-_OHLCV_COLS = ["Open", "High", "Low", "Close", "Volume"]
 _WINDOW = 20
-_TRAIN_END = "2022-12-31"
-_VAL_END = "2023-12-31"
+_HORIZON = 5
+_VALID_VARIANTS = ("baseline", "finbert")
+_VALID_SPLIT_MODES = ("random_search", "manual")
+_SPLIT_RATIOS: dict[str, dict[str, float]] = {
+    "random_search": {"train": 0.70, "val": 0.15},
+    "manual": {"train": 0.80, "val": 0.0},
+}
+_VALID_SPLITS = ("train", "val", "test")
+_SAMPLE_N = 5
 
 
-def _build_combined_frame() -> pd.DataFrame:
-    """OHLCV (cleaned) inner-join sentiment_mean harian — replika logic
-    pipeline/feature_engineering/dataset_builder.py::load_joined(), yang
-    dipakai langsung oleh prediction_service.py untuk training & inference.
-    """
-    df_stock = StockPreprocessor().clean(_load_raw_stock().copy())
-    df_sent = get_repositories()["sentiment"].load_daily_sentiment()
-
-    df = pd.merge(
-        df_stock[["Date"] + _OHLCV_COLS],
-        df_sent[["Date", "sentiment_mean"]],
-        on="Date",
-        how="inner",
-    )
-    return df.sort_values("Date").reset_index(drop=True)
+def _validate_variant(variant: str) -> None:
+    if variant not in _VALID_VARIANTS:
+        raise ValidationError(f"variant harus salah satu dari {_VALID_VARIANTS}, diterima: {variant}")
 
 
-def get_combined_merge_info() -> CombinedMergeInfo:
-    df_stock = StockPreprocessor().clean(_load_raw_stock().copy())
-    df_sent = get_repositories()["sentiment"].load_daily_sentiment()
-    df_merged = _build_combined_frame()
+def _validate_split_mode(split_mode: str) -> None:
+    if split_mode not in _VALID_SPLIT_MODES:
+        raise ValidationError(f"split_mode harus salah satu dari {_VALID_SPLIT_MODES}, diterima: {split_mode}")
 
-    rows_stock = len(df_stock)
-    rows_merged = len(df_merged)
 
-    return CombinedMergeInfo(
-        rows_stock=rows_stock,
-        rows_sentiment=len(df_sent),
-        rows_merged=rows_merged,
-        dropped_no_sentiment_match=rows_stock - rows_merged,
-        coverage_pct=round(rows_merged / rows_stock * 100, 2) if rows_stock else 0.0,
-        date_start=format_iso_date(df_merged["Date"].min()),
-        date_end=format_iso_date(df_merged["Date"].max()),
-        columns=df_merged.columns.tolist(),
-    )
+def _variant_feature_cols(variant: str) -> list[str]:
+    return RETURN_FEATURE_COLS_A if variant == "baseline" else RETURN_FEATURE_COLS_B
 
 
 def get_combined_merge_preview(n: int = 10) -> CombinedMergePreviewResponse:
-    df = _build_combined_frame()
+    """Cuplikan load_joined() — OHLCV bersih inner-join sentiment_mean harian,
+    SEBELUM fitur return dihitung."""
+    df = load_joined()
     return CombinedMergePreviewResponse(
         columns=df.columns.tolist(),
         n=min(n, len(df)),
         rows=_preview_rows(df, n),
+    )
+
+
+def get_combined_scaled_preview(
+    n: int = 10,
+    split: str = "train",
+    variant: str = "finbert",
+    split_mode: str = "random_search",
+) -> CombinedScaledPreviewResponse:
+    """Cuplikan data SETELAH label horizon-5 + split kronologis + capping
+    outlier (IQR, fit train-only) + MinMaxScaler (fit train-only) — bentuk
+    fitur PERSIS yang masuk ke model, sebelum windowing. Reuse
+    load_split_capped() (fungsi training sungguhan), bukan reimplementasi."""
+    if split not in _VALID_SPLITS:
+        raise ValidationError(f"split harus salah satu dari {_VALID_SPLITS}, diterima: {split}")
+    _validate_variant(variant)
+    _validate_split_mode(split_mode)
+
+    from models.lstm.notebook07_common import load_split_capped  # noqa: PLC0415 — lazy, hindari import torch
+
+    feature_cols = _variant_feature_cols(variant)
+    ratios = _SPLIT_RATIOS[split_mode]
+    df_train, df_val, df_test, _capping_bounds, _n_capped = load_split_capped(
+        load_return_features, feature_cols, _HORIZON,
+        train_ratio=ratios["train"], val_ratio=ratios["val"],
+    )
+    splits = {"train": df_train, "val": df_val, "test": df_test}
+    df_target = splits[split]
+
+    scaler = MinMaxScaler()
+    scaler.fit(df_train[feature_cols].values.astype(np.float64))
+
+    df_out = df_target[["Date"] + feature_cols + ["label"]].copy()
+    df_out[feature_cols] = scaler.transform(df_target[feature_cols].values.astype(np.float64))
+
+    return CombinedScaledPreviewResponse(
+        columns=df_out.columns.tolist(),
+        n=min(n, len(df_out)),
+        split=split,
+        variant=variant,
+        split_mode=split_mode,
+        rows=_preview_rows(df_out, n),
     )
 
 
@@ -656,12 +704,26 @@ def _split_range_detail(d: pd.DataFrame) -> dict:
     }
 
 
-def get_combined_pipeline_steps() -> CombinedPipelineStepsResponse:
-    """Mirror ringan dataset_builder.py::build_dataset() (window=20, split default).
+def get_combined_pipeline_steps(
+    variant: str = "finbert", split_mode: str = "random_search",
+) -> CombinedPipelineStepsResponse:
+    """Mirror PERSIS pipeline preprocessing training sungguhan: load_joined()
+    -> load_return_features() (fitur return) -> load_split_capped() (label
+    horizon-5 + split kronologis + capping IQR) -> MinMaxScaler fit-train-only
+    -> windowing (W=20). Fungsi yang sama persis dipakai training_service.py.
 
-    HANYA pandas + sklearn MinMaxScaler — tanpa torch, tanpa windowing array
-    sungguhan (langkah 7 hanya menghitung jumlah sampel per split).
+    HANYA pandas + sklearn MinMaxScaler — load_split_capped diimpor lazy
+    (torch ikut terbawa modulnya) supaya endpoint preview ringan ini tidak
+    memuat torch. Tiap langkah menyertakan cuplikan baris nyata
+    (sample_before/sample_after) supaya perubahan konkret terlihat.
     """
+    _validate_variant(variant)
+    _validate_split_mode(split_mode)
+
+    from models.lstm.notebook07_common import load_split_capped  # noqa: PLC0415
+
+    feature_cols = _variant_feature_cols(variant)
+    ratios = _SPLIT_RATIOS[split_mode]
     steps: list[PipelineStep] = []
 
     # 1. Load & Clean OHLCV
@@ -675,6 +737,8 @@ def get_combined_pipeline_steps() -> CombinedPipelineStepsResponse:
         rows_in=len(df_raw),
         rows_out=len(df_clean),
         detail={"columns_dropped": columns_dropped},
+        sample_before=_preview_rows(df_raw, _SAMPLE_N),
+        sample_after=_preview_rows(df_clean, _SAMPLE_N),
     ))
 
     # 2. Load Sentimen Harian
@@ -689,109 +753,203 @@ def get_combined_pipeline_steps() -> CombinedPipelineStepsResponse:
             "date_start": format_iso_date(df_sent["Date"].min()),
             "date_end": format_iso_date(df_sent["Date"].max()),
         },
+        sample_after=_preview_rows(df_sent, _SAMPLE_N),
     ))
 
-    # 3. Inner Join on Date
-    df_merged = _build_combined_frame()
+    # 3. Inner Join on Date (load_joined() ASLI)
+    df_joined = load_joined()
     rows_clean = len(df_clean)
-    rows_merged = len(df_merged)
+    rows_joined = len(df_joined)
     steps.append(PipelineStep(
         order=3,
         name="Inner Join on Date",
         description="Gabung OHLCV bersih + sentiment_mean; hari trading tanpa berita terbuang",
         rows_in=rows_clean,
-        rows_out=rows_merged,
+        rows_out=rows_joined,
         detail={
-            "coverage_pct": round(rows_merged / rows_clean * 100, 2) if rows_clean else 0.0,
-            "dropped_no_sentiment_match": rows_clean - rows_merged,
+            "coverage_pct": round(rows_joined / rows_clean * 100, 2) if rows_clean else 0.0,
+            "dropped_no_sentiment_match": rows_clean - rows_joined,
         },
+        sample_after=_preview_rows(df_joined, _SAMPLE_N),
     ))
 
-    # 4. Labeling
-    df_labeled = df_merged.copy()
-    df_labeled["label"] = (df_labeled["Close"].shift(-1) > df_labeled["Close"]).astype("float32")
-    df_labeled = df_labeled.iloc[:-1].reset_index(drop=True)
-    label_up_pct = round(float(df_labeled["label"].mean()) * 100, 2) if len(df_labeled) else 0.0
+    # 4. Hitung Fitur Return (pct_change) — load_return_features() ASLI
+    df_return = load_return_features()
     steps.append(PipelineStep(
         order=4,
-        name="Labeling",
-        description="y = 1 jika Close[t+1] > Close[t]; baris terakhir dibuang (label NaN)",
-        rows_in=rows_merged,
-        rows_out=len(df_labeled),
-        detail={
-            "label_up_pct": label_up_pct,
-            "label_down_pct": round(100 - label_up_pct, 2),
-        },
+        name="Hitung Fitur Return (pct_change)",
+        description=(
+            "ret_x = pct_change(x) untuk Open/High/Low/Close/Volume — ganti harga "
+            "level (non-stasioner) jadi return (stasioner); baris pertama & baris "
+            "dengan inf (Volume=0) dibuang"
+        ),
+        rows_in=rows_joined,
+        rows_out=len(df_return),
+        detail={"dropped": rows_joined - len(df_return)},
+        sample_before=_preview_rows(df_joined, _SAMPLE_N),
+        sample_after=_preview_rows(df_return[["Date", *feature_cols, "Close"]], _SAMPLE_N),
     ))
 
-    # 5. Split by Date (SEBELUM scaling)
-    train_end_ts = pd.Timestamp(_TRAIN_END)
-    val_end_ts = pd.Timestamp(_VAL_END)
-
-    mask_train = df_labeled["Date"] <= train_end_ts
-    mask_val = (df_labeled["Date"] > train_end_ts) & (df_labeled["Date"] <= val_end_ts)
-    mask_test = df_labeled["Date"] > val_end_ts
-
-    df_train = df_labeled[mask_train].reset_index(drop=True)
-    df_val = df_labeled[mask_val].reset_index(drop=True)
-    df_test = df_labeled[mask_test].reset_index(drop=True)
-
-    n_labeled = len(df_labeled)
+    # 5. Labeling (horizon N) + Split Kronologis Persentase (SEBELUM capping/scaling)
+    df_train, df_val, df_test, capping_bounds, n_capped = load_split_capped(
+        load_return_features, feature_cols, _HORIZON,
+        train_ratio=ratios["train"], val_ratio=ratios["val"],
+    )
+    n_total = len(df_train) + len(df_val) + len(df_test)
+    label_up_pct = None
+    if n_total:
+        total_up = float(df_train["label"].sum() + df_val["label"].sum() + df_test["label"].sum())
+        label_up_pct = round(total_up / n_total * 100, 2)
+    train_pct = int(round(ratios["train"] * 100))
+    val_pct = int(round(ratios["val"] * 100))
+    test_pct = 100 - train_pct - val_pct
     steps.append(PipelineStep(
         order=5,
-        name="Split by Date",
-        description="train ≤ 2022-12-31 < val ≤ 2023-12-31 < test — split SEBELUM scaling",
-        rows_in=n_labeled,
-        rows_out=n_labeled,
+        name=f"Labeling (horizon={_HORIZON} hari) + Split Kronologis ({train_pct}/{val_pct}/{test_pct})",
+        description=f"y = 1 jika Close[t+{_HORIZON}] > Close[t]; split KRONOLOGIS PERSENTASE (bukan by-date)",
+        rows_in=len(df_return),
+        rows_out=n_total,
         detail={
+            "label_up_pct": label_up_pct,
+            "label_down_pct": round(100 - label_up_pct, 2) if label_up_pct is not None else None,
             "train": _split_range_detail(df_train),
             "val": _split_range_detail(df_val),
             "test": _split_range_detail(df_test),
         },
+        sample_after=_preview_rows(df_train, _SAMPLE_N),
     ))
 
-    # 6. MinMaxScaler (fit train-only, anti-leakage)
-    scaler = MinMaxScaler()
-    if len(df_train):
-        scaler.fit(df_train[FEATURE_COLS].values.astype(np.float64))
-        train_min = {c: round(float(v), 4) for c, v in zip(FEATURE_COLS, scaler.data_min_)}
-        train_max = {c: round(float(v), 4) for c, v in zip(FEATURE_COLS, scaler.data_max_)}
-    else:
-        train_min = {}
-        train_max = {}
+    # 6. Capping Outlier (IQR, fit train-only)
     steps.append(PipelineStep(
         order=6,
-        name="MinMaxScaler (fit train-only)",
-        description="Anti-leakage: fit HANYA di train, transform ke semua split",
+        name="Capping Outlier (IQR, fit train-only)",
+        description="Clip nilai di luar [Q1-1.5×IQR, Q3+1.5×IQR] (dihitung dari train) di semua kolom fitur",
         rows_in=None,
         rows_out=None,
         detail={
-            "feature_cols": FEATURE_COLS,
-            "train_min": train_min,
-            "train_max": train_max,
+            "capping_bounds": {k: list(v) for k, v in capping_bounds.items()},
+            "n_capped": n_capped,
         },
     ))
 
-    # 7. Windowing per-split (tanpa membangun array sungguhan)
+    # 7. MinMaxScaler (fit train-only, anti-leakage) — dari df_train yang SUDAH di-capping
+    scaler = MinMaxScaler()
+    scaler_sample_before = None
+    scaler_sample_after = None
+    train_min: dict[str, float] = {}
+    train_max: dict[str, float] = {}
+    if len(df_train):
+        scaler.fit(df_train[feature_cols].values.astype(np.float64))
+        train_min = {c: round(float(v), 6) for c, v in zip(feature_cols, scaler.data_min_)}
+        train_max = {c: round(float(v), 6) for c, v in zip(feature_cols, scaler.data_max_)}
+
+        sample_cols = ["Date"] + feature_cols
+        scaler_sample_before = _preview_rows(df_train[sample_cols], _SAMPLE_N)
+        df_scaled_sample = df_train[sample_cols].head(_SAMPLE_N).copy()
+        df_scaled_sample[feature_cols] = scaler.transform(
+            df_train[feature_cols].head(_SAMPLE_N).values.astype(np.float64)
+        )
+        scaler_sample_after = _preview_rows(df_scaled_sample, _SAMPLE_N)
+    steps.append(PipelineStep(
+        order=7,
+        name="MinMaxScaler (fit train-only)",
+        description="Anti-leakage: fit HANYA di train (setelah capping), transform ke semua split",
+        rows_in=None,
+        rows_out=None,
+        detail={
+            "feature_cols": feature_cols,
+            "train_min": train_min,
+            "train_max": train_max,
+        },
+        sample_before=scaler_sample_before,
+        sample_after=scaler_sample_after,
+    ))
+
+    # 8. Windowing per-split (tanpa membangun array sungguhan)
     samples_train = max(0, len(df_train) - _WINDOW + 1)
     samples_val = max(0, len(df_val) - _WINDOW + 1)
     samples_test = max(0, len(df_test) - _WINDOW + 1)
+    windowing_sample = None
+    if len(df_train) >= _WINDOW:
+        window_dates = df_train["Date"].iloc[:_WINDOW]
+        target_row = df_train.iloc[_WINDOW - 1]
+        windowing_sample = [{
+            "split": "train",
+            "window_index": 0,
+            "date_start": format_iso_date(window_dates.iloc[0]),
+            "date_end": format_iso_date(window_dates.iloc[-1]),
+            "shape": f"({_WINDOW}, {len(feature_cols)})",
+            "label_di_akhir_window": _none_if_nan(target_row["label"]),
+        }]
     steps.append(PipelineStep(
-        order=7,
-        name="Windowing (W=20)",
-        description="Sliding window per-split, tidak melintasi batas split; X[i] = fitur[i:i+20]",
+        order=8,
+        name=f"Windowing (W={_WINDOW})",
+        description=f"Sliding window per-split, tidak melintasi batas split; X[i] = fitur[i:i+{_WINDOW}]",
         rows_in=None,
         rows_out=None,
         detail={
             "samples_train": samples_train,
             "samples_val": samples_val,
             "samples_test": samples_test,
-            "shape": f"(N, {_WINDOW}, {len(FEATURE_COLS)})",
+            "shape": f"(N, {_WINDOW}, {len(feature_cols)})",
         },
+        sample_after=windowing_sample,
     ))
 
     return CombinedPipelineStepsResponse(
         steps=steps,
         window=_WINDOW,
-        feature_cols=FEATURE_COLS,
+        feature_cols=feature_cols,
+        variant=variant,
+        split_mode=split_mode,
+    )
+
+
+def build_combined_dataset(variant: str = "finbert", split_mode: str = "random_search") -> DatasetBuildResponse:
+    """Tombol 'Bangun Dataset Latih' (Workflow) — jalankan prepare_dataset_bundle()
+    lalu simpan ke disk. Sejak ini, run_skripsi_*_stream()/*_manual_stream()
+    (training_service.py) membaca artifact ini alih-alih recompute sendiri."""
+    _validate_variant(variant)
+    _validate_split_mode(split_mode)
+
+    from models.lstm.notebook07_common import prepare_dataset_bundle, save_dataset_bundle  # noqa: PLC0415
+    from models.lstm.notebook07_trainer import DATASET_ARTIFACT_DIR, dataset_prefix  # noqa: PLC0415
+
+    feature_cols = _variant_feature_cols(variant)
+    ratios = _SPLIT_RATIOS[split_mode]
+    bundle = prepare_dataset_bundle(
+        load_return_features, feature_cols, feature_cols, _HORIZON,
+        ratios["train"], ratios["val"], _WINDOW,
+    )
+    prefix = dataset_prefix(variant, split_mode)
+    result = save_dataset_bundle(bundle, DATASET_ARTIFACT_DIR, prefix)
+
+    return DatasetBuildResponse(
+        variant=variant,
+        split_mode=split_mode,
+        built_at=result["built_at"],
+        split_sizes=result["split_sizes"],
+        n_capped=result["n_capped"],
+    )
+
+
+def get_dataset_status(variant: str = "finbert", split_mode: str = "random_search") -> DatasetStatusResponse:
+    """Status artifact dataset — dipakai badge Workflow & Model Training
+    (gating tombol Run sebelum dataset dibangun/kalau basi)."""
+    _validate_variant(variant)
+    _validate_split_mode(split_mode)
+
+    from models.lstm.notebook07_common import dataset_bundle_status  # noqa: PLC0415
+    from models.lstm.notebook07_trainer import DATASET_ARTIFACT_DIR, dataset_prefix  # noqa: PLC0415
+
+    prefix = dataset_prefix(variant, split_mode)
+    status = dataset_bundle_status(DATASET_ARTIFACT_DIR, prefix)
+
+    return DatasetStatusResponse(
+        variant=variant,
+        split_mode=split_mode,
+        exists=status["exists"],
+        is_fresh=status["is_fresh"],
+        built_at=status["built_at"],
+        split_sizes=status["split_sizes"],
     )

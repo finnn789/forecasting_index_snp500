@@ -232,6 +232,13 @@ class SentimentRawPreviewResponse(BaseModel):
     plot_hint: str = "table — cuplikan baris pertama data sentimen/headline mentah"
 
 
+class SentimentCleanPreviewResponse(BaseModel):
+    columns: list[str]
+    n: int
+    rows: list[dict[str, Any]]
+    plot_hint: str = "table — cuplikan baris pertama hasil scoring FinBERT (headlines_clean.csv)"
+
+
 class NewsPerYearItem(BaseModel):
     year: int
     count: int
@@ -346,29 +353,28 @@ class SentimentMethodComparisonResponse(BaseModel):
 # join yang sama persis dipakai prediction_service.py untuk training/inference)
 # ---------------------------------------------------------------------------
 
-class CombinedMergeInfo(BaseModel):
-    rows_stock: int
-    rows_sentiment: int
-    rows_merged: int
-    dropped_no_sentiment_match: int
-    coverage_pct: float
-    date_start: str
-    date_end: str
-    columns: list[str]
-    note: str = (
-        "Inner join pada kolom Date antara OHLCV (setelah StockPreprocessor.clean()) "
-        "dan sentiment_mean harian — logic identik dengan "
-        "pipeline/feature_engineering/dataset_builder.py::load_joined() yang dipakai "
-        "langsung oleh model untuk training & inference."
-    )
-    plot_hint: str = "table — ringkasan hasil penggabungan OHLCV + sentiment_mean"
-
-
 class CombinedMergePreviewResponse(BaseModel):
     columns: list[str]
     n: int
     rows: list[dict[str, Any]]
     plot_hint: str = "table — cuplikan baris pertama data gabungan OHLCV + sentiment_mean"
+
+
+class CombinedScaledPreviewResponse(BaseModel):
+    columns: list[str]
+    n: int
+    split: str
+    variant: str
+    split_mode: str
+    rows: list[dict[str, Any]]
+    note: str = (
+        "Cuplikan data SETELAH labeling (horizon 5 hari) + split kronologis + "
+        "capping outlier (IQR, fit train-only) + MinMaxScaler (fit train-only) — "
+        "bentuk fitur PERSIS yang masuk ke model (sebelum windowing). Kolom fitur "
+        "train selalu berada di rentang [0,1]; split val/test transform dari "
+        "scaler yang sama sehingga bisa sedikit di luar rentang itu."
+    )
+    plot_hint: str = "table — cuplikan data siap training (setelah MinMaxScaling)"
 
 
 class PipelineStep(BaseModel):
@@ -378,15 +384,53 @@ class PipelineStep(BaseModel):
     rows_in: int | None
     rows_out: int | None
     detail: dict[str, Any]
+    sample_before: list[dict[str, Any]] | None = Field(
+        default=None, description="Cuplikan baris nyata SEBELUM langkah ini dijalankan"
+    )
+    sample_after: list[dict[str, Any]] | None = Field(
+        default=None, description="Cuplikan baris nyata SESUDAH langkah ini dijalankan"
+    )
+
+
+class DatasetBuildResponse(BaseModel):
+    """Hasil tombol 'Bangun Dataset Latih' (Workflow) — dataset dibangun via
+    prepare_dataset_bundle() lalu disimpan ke disk (.npz + scaler + meta),
+    dipakai training_service.py sebagai input training (bukan recompute)."""
+
+    variant: str
+    split_mode: str
+    built_at: str
+    split_sizes: dict[str, int]
+    n_capped: dict[str, dict[str, int]]
+    note: str = (
+        "Dataset tersimpan ke disk — Random Search/Training Manual varian & "
+        "split_mode ini sekarang membaca dari artifact ini, bukan menghitung "
+        "ulang dari raw CSV."
+    )
+
+
+class DatasetStatusResponse(BaseModel):
+    """Status artifact dataset (variant x split_mode) — exists/is_fresh
+    (dibandingkan fingerprint mtime+size sumber CSV saat dataset dibangun)."""
+
+    variant: str
+    split_mode: str
+    exists: bool
+    is_fresh: bool
+    built_at: str | None = None
+    split_sizes: dict[str, int] | None = None
 
 
 class CombinedPipelineStepsResponse(BaseModel):
     steps: list[PipelineStep]
     window: int
     feature_cols: list[str]
+    variant: str
+    split_mode: str
     note: str = (
-        "Mirror dataset_builder.build_dataset() dengan parameter default "
-        "(window=20, train_end=2022-12-31, val_end=2023-12-31) — data yang "
-        "sama persis dengan input training model."
+        "Mirror PERSIS dataset_builder.load_return_features() + "
+        "notebook07_common.load_split_capped() (horizon=5, split kronologis "
+        "persentase, capping outlier IQR fit-train-only) — fungsi ASLI yang "
+        "dipakai training_service.py, bukan simulasi terpisah."
     )
     plot_hint: str = "stepper — langkah preprocessing dataset gabungan"

@@ -81,7 +81,7 @@ def run_preprocessing_pipeline_stream(
             return
 
         try:
-            df_raw = pd.read_csv(raw_csv, usecols=["Title", "Date", "CP"])
+            df_raw = pd.read_csv(raw_csv, usecols=["Title", "Date"])
         except ValueError as e:
             emit({"step": "error", "pct": 5, "msg": f"Kolom wajib tidak lengkap: {e}"})
             return

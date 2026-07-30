@@ -2,8 +2,8 @@ import Icon from '../Icon'
 import { cn } from '../../utils/cn'
 
 /**
- * Banner peringatan class-collapse — reusable oleh TrainingPanel (hasil
- * training live SSE) dan PredictionPanel (hasil training persisted).
+ * Banner peringatan class-collapse — dipakai PredictionPanel (hasil training
+ * persisted).
  */
 export default function ClassCollapseBanner({ diagnosis }) {
   if (!diagnosis) return null

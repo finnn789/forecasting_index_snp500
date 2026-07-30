@@ -6,36 +6,12 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '.
 import MetricsCards from '../model-training/MetricsCards'
 import ConfusionMatrixGrid from '../model-training/ConfusionMatrixGrid'
 import ClassCollapseBanner from '../model-training/ClassCollapseBanner'
-import { fmtNum, fmtPct } from '../model-training/TrainingPanel'
+import { fmtNum, fmtPct } from '../model-training/format'
 import { useModelResult } from '../../hooks/useModelResult'
 import { cn } from '../../utils/cn'
 
-// Default: varian Notebook05 (Training Live) — 5 metrik termasuk F2, header
-// stats best_val_f2/best_epoch. Varian Random Search (notebook07/skripsi)
-// kirim NOTEBOOK07_METRIC_KEYS/NOTEBOOK07_HEADER_STATS dari Predictions.jsx
-// (4 metrik saja sesuai Batasan Masalah BAB I, tanpa F2/best_epoch).
-export const NOTEBOOK05_METRIC_KEYS = [
-  { key: 'accuracy', label: 'Accuracy', format: 'pct' },
-  { key: 'precision', label: 'Precision', format: 'pct' },
-  { key: 'recall', label: 'Recall', format: 'pct' },
-  { key: 'f1', label: 'F1', format: 'pct' },
-  { key: 'f2', label: 'F2', format: 'pct' },
-]
-
-export const NOTEBOOK05_BACKTEST_METRIC_KEYS = [
-  { key: 'accuracy', label: 'Accuracy', format: 'pct' },
-  { key: 'precision', label: 'Precision', format: 'pct' },
-  { key: 'recall', label: 'Recall', format: 'pct' },
-  { key: 'f1', label: 'F1', format: 'pct' },
-  { key: 'auc', label: 'AUC', format: 'num', digits: 3 },
-]
-
-export const NOTEBOOK05_HEADER_STATS = [
-  { key: 'best_val_f2', label: 'Best Val F2', format: 'num' },
-  { key: 'best_epoch', label: 'Best Epoch', format: 'raw' },
-  { key: 'trained_at', label: 'Trained At', format: 'raw' },
-]
-
+// Random Search skripsi-scoped (notebook 07) — 4 metrik sesuai Batasan
+// Masalah BAB I (tanpa F2/best_epoch).
 export const NOTEBOOK07_METRIC_KEYS = [
   { key: 'accuracy', label: 'Accuracy', format: 'pct' },
   { key: 'precision', label: 'Precision', format: 'pct' },
@@ -64,19 +40,17 @@ function buildEntries(metrics, keys) {
 }
 
 /**
- * Panel Prediction untuk satu varian model. Hasil training diambil dari
- * backend (persisted di metadata.json), BUKAN dari React state TrainingPanel
- * — jadi tetap terlihat walau user sudah pindah halaman. Reusable lintas 2
- * keluarga model (Notebook05 Training Live & Notebook07 Random Search) lewat
- * prop `metricKeys`/`backtestMetricKeys`/`headerStats`.
+ * Panel Prediction untuk satu varian model (Model A: baseline / Model B:
+ * FinBERT-LSTM). Hasil training diambil dari backend (persisted di
+ * metadata.json) — jadi tetap terlihat walau user sudah pindah halaman.
  */
 export default function PredictionPanel({
   resultPath,
   predictPath,
   backtestPath,
-  metricKeys = NOTEBOOK05_METRIC_KEYS,
-  backtestMetricKeys = NOTEBOOK05_BACKTEST_METRIC_KEYS,
-  headerStats = NOTEBOOK05_HEADER_STATS,
+  metricKeys,
+  backtestMetricKeys,
+  headerStats,
 }) {
   const { result, predict, predictState, backtest, backtestState } = useModelResult(resultPath)
 
@@ -90,6 +64,7 @@ export default function PredictionPanel({
   )
 
   const isAvailable = Boolean(result.data?.is_available)
+  const evalSplitLabel = result.data?.eval_split === 'test' ? 'Test' : 'Val'
 
   return (
     <div className="space-y-6">
@@ -126,14 +101,19 @@ export default function PredictionPanel({
         {isAvailable && (
           <CardContent className="space-y-4">
             <div className="flex flex-wrap items-center gap-6 text-sm">
-              {headerStats.map((stat) => (
-                <div key={stat.key}>
-                  <span className="text-xs uppercase tracking-wide text-slate-400">{stat.label}</span>
-                  <p className="font-mono font-semibold text-slate-900">
-                    {formatValue(result.data[stat.key], stat.format)}
-                  </p>
-                </div>
-              ))}
+              {headerStats.map((stat) => {
+                const label = stat.key === 'best_val_f1' || stat.key === 'best_val_acc'
+                  ? stat.label.replace('Val', evalSplitLabel)
+                  : stat.label
+                return (
+                  <div key={stat.key}>
+                    <span className="text-xs uppercase tracking-wide text-slate-400">{label}</span>
+                    <p className="font-mono font-semibold text-slate-900">
+                      {formatValue(result.data[stat.key], stat.format)}
+                    </p>
+                  </div>
+                )
+              })}
             </div>
 
             <MetricsCards entries={trainingMetricEntries} />

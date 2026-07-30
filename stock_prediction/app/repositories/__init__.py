@@ -35,6 +35,7 @@ def get_default_repositories() -> dict:
         "stock": StockRepository(
             raw_dir=base / "data/raw/stocks",
             processed_dir=base / "data/processed/stocks",
+            date_suffix=settings.stock_data_range,
         ),
         "news": NewsRepository(
             raw_dir=base / "data/raw/news",

@@ -125,8 +125,60 @@ function GenericDetail({ detail }) {
 
 function StepDetail({ step, featureCols }) {
   if (step.order === 5) return <SplitDetail detail={step.detail} />
-  if (step.order === 6) return <ScalerDetail detail={step.detail} featureCols={featureCols} />
+  if (step.order === 7) return <ScalerDetail detail={step.detail} featureCols={featureCols} />
   return <GenericDetail detail={step.detail} />
+}
+
+function MiniTable({ rows, title }) {
+  if (!rows?.length) return null
+  const cols = Object.keys(rows[0])
+
+  return (
+    <div>
+      {title && <p className="mb-1 text-xs font-medium text-slate-500">{title}</p>}
+      <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-slate-200 bg-slate-50">
+              {cols.map((col) => (
+                <th
+                  key={col}
+                  className="whitespace-nowrap px-2 py-1 text-left font-semibold uppercase tracking-wide text-slate-500"
+                >
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr key={i} className="border-b border-slate-100 last:border-0">
+                {cols.map((col) => (
+                  <td key={col} className="whitespace-nowrap px-2 py-1 font-mono text-slate-900">
+                    {formatValue(row[col])}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function SamplePreview({ step }) {
+  if (!step.sample_before?.length && !step.sample_after?.length) return null
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Contoh Baris Nyata</p>
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+        <MiniTable rows={step.sample_before} title="Sebelum" />
+        <MiniTable rows={step.sample_after} title={step.sample_before?.length ? 'Sesudah' : undefined} />
+      </div>
+    </div>
+  )
 }
 
 export default function PipelineStepsView({ data }) {
@@ -150,6 +202,7 @@ export default function PipelineStepsView({ data }) {
               <div className="mt-2 space-y-3">
                 <RowsBadge rowsIn={step.rows_in} rowsOut={step.rows_out} />
                 <StepDetail step={step} featureCols={featureCols} />
+                <SamplePreview step={step} />
               </div>
             </div>
           </div>
@@ -165,9 +218,11 @@ export default function PipelineStepsView({ data }) {
 
       <div>
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Hasil Akhir — Cuplikan Data Gabungan
+          Hasil Akhir — Cuplikan Data Siap Training (Setelah MinMax Scaling)
         </p>
-        <DataPreviewTable path="/data-analysis/combined/merge-preview?n=10" />
+        <DataPreviewTable
+          path={`/data-analysis/combined/scaled-preview?n=10&split=train&variant=${data?.variant ?? 'finbert'}&split_mode=${data?.split_mode ?? 'random_search'}`}
+        />
       </div>
     </div>
   )

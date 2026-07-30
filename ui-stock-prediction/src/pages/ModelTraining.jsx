@@ -5,24 +5,29 @@ import Icon from '../components/Icon'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../components/ui/table'
 import { fetchJson } from '../utils/api'
 import { cn } from '../utils/cn'
-import TrainingPanel, { CONFIG_KEYS, fmtNum, fmtPct } from '../components/model-training/TrainingPanel'
+import { fmtPct } from '../components/model-training/format'
 import RandomSearchPanel from '../components/model-training/RandomSearchPanel'
-
-const GRID_TABLE_COLUMNS = [
-  { key: 'seq_len', label: 'Seq Len' },
-  { key: 'hidden_size', label: 'Hidden' },
-  { key: 'num_layers', label: 'Layers' },
-  { key: 'dropout', label: 'Dropout' },
-  { key: 'lr', label: 'LR' },
-  { key: 'batch_size', label: 'Batch' },
-]
+import ManualTrainingPanel from '../components/model-training/ManualTrainingPanel'
 
 const VARIANTS = [
-  { key: 'sentiment', label: 'NB05: OHLCV + Sentimen', kind: 'notebook05', endpoint: '/train/notebook05' },
-  { key: 'ohlcv', label: 'NB05: OHLCV Saja (Ablation)', kind: 'notebook05', endpoint: '/train/notebook05/ohlcv' },
-  { key: 'skripsi-baseline', label: 'Skripsi: LSTM-OHLCV', kind: 'skripsi', endpoint: '/train/skripsi/ohlcv' },
-  { key: 'skripsi-finbert', label: 'Skripsi: FinBERT-LSTM', kind: 'skripsi', endpoint: '/train/skripsi/finbert-lstm' },
+  {
+    key: 'skripsi-baseline',
+    label: 'LSTM',
+    endpoint: '/train/skripsi/ohlcv',
+    manualEndpoint: '/train/skripsi/ohlcv/manual',
+  },
+  {
+    key: 'skripsi-finbert',
+    label: 'FinBERT-LSTM',
+    endpoint: '/train/skripsi/finbert-lstm',
+    manualEndpoint: '/train/skripsi/finbert-lstm/manual',
+  },
 ]
+
+const INITIAL_MANUAL_PREFILL = {
+  'skripsi-baseline': { config: null, token: 0 },
+  'skripsi-finbert': { config: null, token: 0 },
+}
 
 const SEARCH_SPACE_ROWS = [
   { key: 'hidden_size', label: 'Hidden Size' },
@@ -42,39 +47,19 @@ const COMPARISON_METRICS = [
   { key: 'f1', label: 'F1-Score' },
 ]
 
-function isBestConfig(row, best) {
-  if (!best) return false
-  return CONFIG_KEYS.every((key) => row[key] === best[key])
-}
-
 function formatSpaceValue(value) {
   if (Array.isArray(value)) return value.join(', ')
   return String(value)
 }
 
 export default function ModelTraining() {
-  const [gridState, setGridState] = useState({ data: null, loading: true, error: null })
   const [searchSpaceState, setSearchSpaceState] = useState({ data: null, loading: true, error: null })
   const [activeVariant, setActiveVariant] = useState(VARIANTS[0].key)
   const [skripsiResults, setSkripsiResults] = useState({ baseline: null, finbert: null })
-
-  // Ambil hasil grid-search (statis, tidak dijalankan ulang dari FE). Hyperparameter
-  // ini juga dipakai sebagai default utk varian OHLCV-only (ablation, lihat catatan di bawah).
-  useEffect(() => {
-    const controller = new AbortController()
-
-    fetchJson('/train/notebook05/grid-search-result', { signal: controller.signal })
-      .then((data) => setGridState({ data, loading: false, error: null }))
-      .catch((error) => {
-        if (error.name === 'AbortError') return
-        setGridState({ data: null, loading: false, error: error.message })
-      })
-
-    return () => controller.abort()
-  }, [])
+  const [manualPrefill, setManualPrefill] = useState(INITIAL_MANUAL_PREFILL)
 
   // Ambil search space Random Search skripsi-scoped (statis, info saja — Random
-  // Search dijalankan LIVE, tidak ada hasil statis seperti grid-search notebook 05).
+  // Search dijalankan LIVE, tidak ada hasil statis tersimpan).
   useEffect(() => {
     const controller = new AbortController()
 
@@ -87,8 +72,6 @@ export default function ModelTraining() {
 
     return () => controller.abort()
   }, [])
-
-  const bestConfig = gridState.data?.best_config ?? null
 
   const comparisonRows = useMemo(() => {
     const { baseline, finbert } = skripsiResults
@@ -103,90 +86,11 @@ export default function ModelTraining() {
   return (
     <PageContainer
       title="Model Training"
-      description="Latih model LSTM mengikuti metodologi Notebook 05, langsung dari browser via streaming SSE."
+      description="Jalankan Random Search dan bandingkan hasil model baseline (OHLCV) vs FinBERT-LSTM (OHLCV + Sentimen)."
     >
       <Card>
         <CardHeader>
-          <CardTitle>Grid Search (Hasil Sebelumnya)</CardTitle>
-        </CardHeader>
-
-        {gridState.loading && (
-          <CardContent className="flex h-32 items-center justify-center gap-2 text-sm text-slate-400">
-            <Icon name="progress_activity" className="animate-spin text-lg" />
-            Memuat hasil grid-search...
-          </CardContent>
-        )}
-
-        {gridState.error && (
-          <CardContent>
-            <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
-              <Icon name="error" className="text-lg" />
-              {gridState.error}
-            </div>
-          </CardContent>
-        )}
-
-        {gridState.data && (
-          <>
-            <div className="flex flex-wrap items-center gap-6 border-b border-slate-200 px-6 py-3 text-sm">
-              <div>
-                <span className="text-xs uppercase tracking-wide text-slate-400">Total Kombinasi</span>
-                <p className="font-mono font-semibold text-slate-900">{gridState.data.total_combinations}</p>
-              </div>
-              <div>
-                <span className="text-xs uppercase tracking-wide text-slate-400">Best Val F2</span>
-                <p className="font-mono font-semibold text-slate-900">{fmtNum(gridState.data.best_val_f2)}</p>
-              </div>
-            </div>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    {GRID_TABLE_COLUMNS.map((col) => (
-                      <TableHead key={col.key}>{col.label}</TableHead>
-                    ))}
-                    <TableHead>Val F2</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {gridState.data.top_configs.map((row, idx) => {
-                    const best = idx === 0 || isBestConfig(row, gridState.data.best_config)
-                    return (
-                      <TableRow key={idx}>
-                        {GRID_TABLE_COLUMNS.map((col) => (
-                          <TableCell key={col.key} className="font-mono">
-                            {row[col.key]}
-                          </TableCell>
-                        ))}
-                        <TableCell className="font-mono font-semibold text-slate-900">
-                          <div className="flex items-center gap-2">
-                            {fmtNum(row.val_f2)}
-                            {best && (
-                              <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-600">
-                                Best
-                              </span>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            </CardContent>
-            <CardContent className="border-t border-slate-200 py-3 text-xs text-slate-500">
-              Hyperparameter di atas juga dipakai sebagai default utk varian{' '}
-              <span className="font-semibold text-slate-700">OHLCV Saja (Ablation)</span> — grid-search 5-fitur
-              (tanpa <code className="font-mono">sentiment_mean</code>) tidak dijalankan ulang, supaya perbandingan
-              antar varian adil (variabel terkontrol).
-            </CardContent>
-          </>
-        )}
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Random Search — Search Space (Notebook 07, Skripsi Scoped)</CardTitle>
+          <CardTitle>Random Search — Search Space (Notebook 07)</CardTitle>
         </CardHeader>
 
         {searchSpaceState.loading && (
@@ -232,9 +136,8 @@ export default function ModelTraining() {
               </Table>
             </CardContent>
             <CardContent className="border-t border-slate-200 py-3 text-xs text-slate-500">
-              Random Search dijalankan LIVE tiap kali tombol "Mulai Random Search" diklik di tab Skripsi di bawah —
-              tidak ada hasil statis seperti tabel grid-search notebook 05, karena metodologi Batasan Masalah BAB I
-              memang mensyaratkan Random Search (bukan Grid Search).
+              Random Search dijalankan LIVE tiap kali tombol "Mulai Random Search" diklik di tab di bawah, sesuai
+              metodologi Batasan Masalah BAB I (Random Search, bukan Grid Search).
             </CardContent>
           </>
         )}
@@ -259,33 +162,46 @@ export default function ModelTraining() {
       </div>
 
       {/*
-        Semua 4 panel (2 notebook05 + 2 skripsi) dirender SEKALIGUS dan tetap
-        mounted permanen — tab yang tidak aktif hanya disembunyikan lewat
-        className, BUKAN conditional render ({activeVariant === X && <Panel/>}).
-        Alasan: conditional render akan unmount panel yang tidak aktif, yang
-        berarti training SSE yang sedang berjalan di tab itu ter-abort
-        (AbortController cleanup) dan seluruh progress (log epoch/iterasi, chart)
-        hilang. Tujuan fitur ini adalah membandingkan training berdampingan yang
-        bisa berjalan cukup lama, jadi identitas komponen harus tetap sama saat
-        pindah tab.
+        Kedua panel dirender SEKALIGUS dan tetap mounted permanen — tab yang
+        tidak aktif hanya disembunyikan lewat className, BUKAN conditional
+        render ({activeVariant === X && <Panel/>}). Alasan: conditional render
+        akan unmount panel yang tidak aktif, yang berarti training SSE yang
+        sedang berjalan di tab itu ter-abort (AbortController cleanup) dan
+        seluruh progress (log epoch/iterasi, chart) hilang. Tujuan fitur ini
+        adalah membandingkan training berdampingan yang bisa berjalan cukup
+        lama, jadi identitas komponen harus tetap sama saat pindah tab.
       */}
-      {VARIANTS.map((variant) => (
-        <div key={variant.key} className={cn(activeVariant !== variant.key && 'hidden')}>
-          {variant.kind === 'notebook05' ? (
-            <TrainingPanel endpoint={variant.endpoint} bestConfig={bestConfig} />
-          ) : (
+      {VARIANTS.map((variant) => {
+        const datasetVariant = variant.key === 'skripsi-baseline' ? 'baseline' : 'finbert'
+        return (
+          <div key={variant.key} className={cn('space-y-6', activeVariant !== variant.key && 'hidden')}>
             <RandomSearchPanel
               endpoint={variant.endpoint}
+              variant={datasetVariant}
               onDone={(result) =>
                 setSkripsiResults((prev) => ({
                   ...prev,
-                  [variant.key === 'skripsi-baseline' ? 'baseline' : 'finbert']: result,
+                  [datasetVariant]: result,
+                }))
+              }
+              onUseBestConfig={(bestConfig) =>
+                setManualPrefill((prev) => ({
+                  ...prev,
+                  [variant.key]: { config: bestConfig, token: prev[variant.key].token + 1 },
                 }))
               }
             />
-          )}
-        </div>
-      ))}
+
+            <div className="border-t border-slate-200 pt-6">
+              <ManualTrainingPanel
+                endpoint={variant.manualEndpoint}
+                variant={datasetVariant}
+                prefill={manualPrefill[variant.key]}
+              />
+            </div>
+          </div>
+        )
+      })}
 
       {comparisonRows && (
         <Card>

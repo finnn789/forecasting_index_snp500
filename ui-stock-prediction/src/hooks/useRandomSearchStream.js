@@ -15,10 +15,9 @@ const INITIAL_STATE = {
 
 /**
  * Hook untuk menjalankan Random Search skripsi-scoped (notebook 07) via SSE.
- * Beda dari useTrainingStream.js (notebook 05, flat start/epoch/done): stream
- * ini BERSARANG 3 level — start -> [iteration_start -> epoch xN -> iteration_end]
- * x n_iter -> done/error — karena Random Search melatih N model independen
- * (1 model = 1 konfigurasi), bukan 1 model final.
+ * Stream ini BERSARANG 3 level — start -> [iteration_start -> epoch xN ->
+ * iteration_end] x n_iter -> done/error — karena Random Search melatih N
+ * model independen (1 model = 1 konfigurasi), bukan 1 model final.
  *
  * `currentEpochs` HANYA menyimpan epoch dari iterasi yang sedang berjalan (di-reset
  * tiap iteration_start) supaya chart tetap ringan & bermakna — histori 20 iterasi

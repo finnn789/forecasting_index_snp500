@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import Card, { CardHeader, CardTitle, CardContent } from '../Card'
 import Button from '../Button'
 import Input from '../Input'
@@ -7,7 +8,8 @@ import PlotlyChart from '../charts/PlotlyChart'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../ui/table'
 import { BASE_LAYOUT, CHART_COLORS } from '../../utils/chartTheme'
 import { useRandomSearchStream } from '../../hooks/useRandomSearchStream'
-import { fmtNum, fmtPct } from './TrainingPanel'
+import { useDatasetGate } from '../../hooks/useDatasetGate'
+import { fmtNum, fmtPct } from './format'
 
 const HISTORY_COLUMNS = [
   { key: 'hidden_size', label: 'Hidden' },
@@ -22,20 +24,21 @@ const HISTORY_COLUMNS = [
 /**
  * Panel Random Search (live SSE, nested per-iterasi + per-epoch) untuk satu
  * varian model skripsi-scoped (Model A: LSTM-OHLCV baseline, atau Model B:
- * FinBERT-LSTM). Beda dari TrainingPanel.jsx (notebook 05, 1 model final):
- * di sini N_ITER model independen dilatih berurutan — chart live cuma
+ * FinBERT-LSTM). N_ITER model independen dilatih berurutan — chart live cuma
  * menampilkan iterasi yang SEDANG berjalan, histori iterasi selesai
  * ditampilkan sbg tabel ringkasan di bawahnya.
  *
  * Search space & window TIDAK bisa dikonfigurasi dari UI (tetap sesuai
  * Batasan Masalah BAB I skripsi) — hanya jumlah iterasi yang bisa di-override.
  */
-export default function RandomSearchPanel({ endpoint, onDone }) {
+export default function RandomSearchPanel({ endpoint, variant, onDone, onUseBestConfig }) {
   const [nIter, setNIter] = useState(20)
   const stream = useRandomSearchStream(endpoint)
+  const gate = useDatasetGate(variant, 'random_search')
   const logEndRef = useRef(null)
 
   const isRunning = stream.status === 'running'
+  const canStart = !isRunning && !gate.loading && gate.ready
 
   useEffect(() => {
     if (stream.status === 'done' && stream.result && onDone) {
@@ -45,7 +48,7 @@ export default function RandomSearchPanel({ endpoint, onDone }) {
   }, [stream.status, stream.result])
 
   function handleStart() {
-    if (isRunning) return
+    if (!canStart) return
     stream.startTraining({ n_iter: Number(nIter) })
   }
 
@@ -163,7 +166,7 @@ export default function RandomSearchPanel({ endpoint, onDone }) {
                 className="w-28"
               />
             </div>
-            <Button onClick={handleStart} disabled={isRunning}>
+            <Button onClick={handleStart} disabled={!canStart}>
               {isRunning ? (
                 <Icon name="progress_activity" className="animate-spin text-base" />
               ) : (
@@ -172,6 +175,18 @@ export default function RandomSearchPanel({ endpoint, onDone }) {
               Mulai Random Search
             </Button>
           </div>
+
+          {!gate.loading && !gate.ready && (
+            <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              <Icon name="info" className="text-lg" />
+              <span>
+                Dataset latih (split 70/15/15) belum dibangun atau basi.{' '}
+                <Link to="/workflow" className="font-medium underline">
+                  Bangun di halaman Workflow →
+                </Link>
+              </span>
+            </div>
+          )}
 
           {stream.status !== 'idle' && (
             <div className="space-y-2 rounded border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-medium text-slate-600">
@@ -349,7 +364,19 @@ export default function RandomSearchPanel({ endpoint, onDone }) {
                 </div>
               </div>
               <div className="space-y-1 text-xs">
-                <p className="uppercase tracking-wide text-slate-400">Best Config</p>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="uppercase tracking-wide text-slate-400">Best Config</p>
+                  {stream.result.best_config && onUseBestConfig && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => onUseBestConfig(stream.result.best_config)}
+                    >
+                      <Icon name="restart_alt" className="text-base" />
+                      Retrain dengan Best Config
+                    </Button>
+                  )}
+                </div>
                 <p className="break-all font-mono text-slate-600">
                   {Object.entries(stream.result.best_config ?? {})
                     .map(([k, v]) => `${k}=${v}`)

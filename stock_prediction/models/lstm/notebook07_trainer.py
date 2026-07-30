@@ -35,7 +35,14 @@ SEARCH_SPACE: dict[str, Any] = {
 }
 
 N_ITER = 20
-WINDOW = 30
+WINDOW = 20
+
+# Horizon prediksi (hari) untuk varian Model A/B skripsi — DEVIASI Batasan
+# Masalah BAB I (semula 1-hari) disengaja, keputusan eksplisit user 2026-07-28
+# setelah notebook 12 (`12_LSTM_solusi_return_features_horizon_compare.ipynb`)
+# menunjukkan fitur return + horizon 5-hari sbg solusi collapse/bias. Lihat
+# CLAUDE.md log tanggal tsb.
+RETURN_HORIZON = 5
 
 # ---------------------------------------------------------------------------
 # Artefak
@@ -54,3 +61,16 @@ FINBERT_FILES: dict[str, str] = {
     "scaler": "finbert_lstm_skripsi_scaler.joblib",
     "metadata": "finbert_lstm_skripsi_metadata.json",
 }
+
+# ---------------------------------------------------------------------------
+# Artifact DatasetBundle (fitur normalisasi hasil "Bangun Dataset Latih",
+# halaman Workflow) — terpisah dari artefak model (BASELINE_FILES/FINBERT_FILES
+# di atas). 4 kombinasi: variant(baseline|finbert) x split_mode(random_search|
+# manual) — beda rasio split (70/15/15 vs 80/20) & beda feature_cols/capping_cols.
+# ---------------------------------------------------------------------------
+
+DATASET_ARTIFACT_DIR = "data/processed/combined"
+
+
+def dataset_prefix(variant: str, split_mode: str) -> str:
+    return f"{variant}_{split_mode}"

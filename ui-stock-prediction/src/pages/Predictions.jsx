@@ -8,22 +8,8 @@ import { cn } from '../utils/cn'
 
 const VARIANTS = [
   {
-    key: 'sentiment',
-    label: 'OHLCV + Sentimen',
-    resultPath: '/train/notebook05/result',
-    predictPath: '/train/notebook05/predict',
-    backtestPath: '/train/notebook05/backtest?split=test',
-  },
-  {
-    key: 'ohlcv',
-    label: 'OHLCV Saja',
-    resultPath: '/train/notebook05/ohlcv/result',
-    predictPath: '/train/notebook05/ohlcv/predict',
-    backtestPath: '/train/notebook05/ohlcv/backtest?split=test',
-  },
-  {
     key: 'skripsi-baseline',
-    label: 'Skripsi: LSTM-OHLCV',
+    label: 'LSTM',
     resultPath: '/train/skripsi/ohlcv/result',
     predictPath: '/train/skripsi/ohlcv/predict',
     backtestPath: '/train/skripsi/ohlcv/backtest?split=test',
@@ -33,7 +19,7 @@ const VARIANTS = [
   },
   {
     key: 'skripsi-finbert',
-    label: 'Skripsi: FinBERT-LSTM',
+    label: 'FinBERT-LSTM',
     resultPath: '/train/skripsi/finbert-lstm/result',
     predictPath: '/train/skripsi/finbert-lstm/predict',
     backtestPath: '/train/skripsi/finbert-lstm/backtest?split=test',
@@ -49,7 +35,7 @@ export default function Predictions() {
   return (
     <PageContainer
       title="Predictions"
-      description="Hasil training tersimpan di backend — lihat metrik, jalankan prediksi hari berikutnya, dan backtest untuk tiap varian model (Training Live Notebook 05 & Random Search Skripsi)."
+      description="Hasil training tersimpan di backend — lihat metrik, jalankan prediksi hari berikutnya, dan backtest untuk tiap varian model (Random Search Skripsi-Scoped)."
     >
       <div className="flex gap-2 border-b border-slate-200">
         {VARIANTS.map((variant) => (

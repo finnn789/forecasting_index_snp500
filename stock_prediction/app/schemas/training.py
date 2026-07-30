@@ -1,11 +1,11 @@
 """
-app/schemas/training.py — Pydantic schemas untuk endpoint "API Training Live
-Notebook 05" (training final LSTM terisolasi + hasil grid-search statis).
+app/schemas/training.py — Pydantic schemas untuk endpoint "Random Search
+Skripsi-Scoped" (notebook 07, Batasan Masalah BAB I skripsi).
 
-Event SSE (`start`/`epoch`/`done`/`error`) sengaja TIDAK divalidasi lewat
-Pydantic model saat streaming (payload berupa dict biasa, lihat
-models/lstm/notebook05_trainer.py) — skema di sini hanya dokumentatif untuk
-request body dan endpoint grid-search-result (non-streaming, JSON biasa).
+Event SSE (`start`/`iteration_start`/`epoch`/`iteration_end`/`done`/`error`)
+sengaja TIDAK divalidasi lewat Pydantic model saat streaming (payload berupa
+dict biasa) — skema di sini hanya dokumentatif untuk request body dan
+endpoint hasil/prediksi/backtest (non-streaming, JSON biasa).
 """
 
 from __future__ import annotations
@@ -15,104 +15,6 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.prediction import BacktestPoint, ConfusionMatrix
-
-
-# ---------------------------------------------------------------------------
-# Request: POST /api/v1/train/notebook05
-# ---------------------------------------------------------------------------
-
-class TrainRequest(BaseModel):
-    """Override hyperparameter training final. Semua opsional — default =
-    best config hasil grid-search 144 kombinasi (notebook 05, §1.3)."""
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "seq_len": 20,
-                "hidden_size": 64,
-                "num_layers": 2,
-                "dropout": 0.4,
-                "lr": 0.0005,
-                "batch_size": 64,
-                "epochs": 150,
-                "early_stop": 30,
-            }
-        }
-    )
-
-    seq_len: int | None = None
-    hidden_size: int | None = None
-    num_layers: int | None = None
-    dropout: float | None = None
-    lr: float | None = None
-    batch_size: int | None = None
-    epochs: int | None = None
-    early_stop: int | None = None
-
-
-# ---------------------------------------------------------------------------
-# Response: GET /api/v1/train/notebook05/grid-search-result
-# ---------------------------------------------------------------------------
-
-class GridConfigRow(BaseModel):
-    """Satu baris konfigurasi hasil grid-search (statis, hardcode dari notebook)."""
-
-    seq_len: int
-    hidden_size: int
-    num_layers: int
-    dropout: float
-    lr: float
-    batch_size: int
-    epochs: int
-    early_stop: int
-    val_f2: float
-
-
-class BestConfig(BaseModel):
-    """Konfigurasi terbaik — dipakai sebagai default training final
-    (epochs/early_stop berbeda dari top_configs karena fase final vs
-    grid-search, lihat catatan di notebook05_trainer.py)."""
-
-    seq_len: int
-    hidden_size: int
-    num_layers: int
-    dropout: float
-    lr: float
-    batch_size: int
-    epochs: int
-    early_stop: int
-
-
-class GridSearchResultResponse(BaseModel):
-    """Hasil grid-search 144 kombinasi (STATIS, hardcode — TIDAK dijalankan
-    ulang server-side)."""
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "total_combinations": 144,
-                "best_val_f2": 0.811037,
-                "best_config": {
-                    "seq_len": 20,
-                    "hidden_size": 64,
-                    "num_layers": 2,
-                    "dropout": 0.4,
-                    "lr": 0.0005,
-                    "batch_size": 64,
-                    "epochs": 150,
-                    "early_stop": 30,
-                },
-                "top_configs": [],
-            }
-        }
-    )
-
-    total_combinations: int
-    best_val_f2: float
-    best_config: BestConfig
-    top_configs: list[GridConfigRow] = Field(
-        description="Top 10 konfigurasi hasil grid-search, diurutkan val_f2 desc"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +30,34 @@ class SkripsiTrainRequest(BaseModel):
     model_config = ConfigDict(json_schema_extra={"example": {"n_iter": 20}})
 
     n_iter: int | None = None
+
+
+class ManualTrainRequest(BaseModel):
+    """Training 1-konfigurasi (fixed hyperparameter) — dipakai fitur "Training
+    Manual" (input bebas) dan "Retrain dengan Best Config" (prefill dari hasil
+    Random Search). Berbeda dari `SkripsiTrainRequest`: SEMUA hyperparameter
+    wajib dikirim FE, TIDAK ada sampling/pencarian. Validasi hanya batas wajar
+    (positif, dropout<1) — nilai TIDAK dibatasi ke pilihan diskrit search space
+    Random Search (sesuai keputusan: input manual bersifat bebas)."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "hidden_size": 64, "num_layers": 1, "dropout": 0.3,
+                "optimizer": "adam", "activation": "relu", "lr": 0.001,
+                "epochs": 30, "batch_size": 32,
+            }
+        }
+    )
+
+    hidden_size: int = Field(..., gt=0)
+    num_layers: int = Field(..., gt=0)
+    dropout: float = Field(..., ge=0, lt=1)
+    optimizer: Literal["adam", "rmsprop", "sgd"]
+    activation: Literal["relu", "tanh", "sigmoid"]
+    lr: float = Field(..., gt=0)
+    epochs: int = Field(..., gt=0)
+    batch_size: int = Field(..., gt=0)
 
 
 class SearchSpaceResponse(BaseModel):
@@ -165,128 +95,9 @@ class SearchSpaceResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Halaman Prediction — hasil training notebook05 (persisted) + prediksi +
-# backtest. Selaras dgn 2 varian training di atas (sentimen/ohlcv).
-# ---------------------------------------------------------------------------
-
-class Notebook05ResultResponse(BaseModel):
-    """Hasil training notebook05 (varian sentimen/ohlcv) yang sudah dipersist
-    di metadata.json — SELALU HTTP 200 (mirror `ModelInfoResponse` produksi),
-    `is_available=False` kalau belum pernah training (BUKAN 404)."""
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "is_available": True,
-                "config": {"seq_len": 20, "hidden_size": 64},
-                "feature_cols": ["Open", "High", "Low", "Close", "Volume", "sentiment_mean"],
-                "metrics": {"accuracy": 0.62, "precision": 0.76, "recall": 1.0, "f1": 0.86, "f2": 0.93},
-                "confusion_matrix": {"tp": 34, "tn": 0, "fp": 11, "fn": 0},
-                "diagnosis": {
-                    "overfitting": False,
-                    "underfitting": False,
-                    "fit_status": "GOOD_FIT",
-                    "class_collapse": {"train": True, "val": True, "test": True},
-                    "any_collapse": True,
-                },
-                "split_sizes": {
-                    "train_rows": 1068, "val_rows": 229, "test_rows": 230,
-                    "train_samples": 1058, "val_samples": 219, "test_samples": 220,
-                },
-                "trained_at": "2026-07-12T00:00:00+00:00",
-                "best_epoch": 12,
-                "best_val_f2": 0.8110,
-            }
-        }
-    )
-
-    is_available: bool
-    config: dict | None = None
-    feature_cols: list[str] | None = None
-    metrics: dict | None = None
-    confusion_matrix: dict | None = None
-    diagnosis: dict | None = None
-    split_sizes: dict | None = None
-    trained_at: str | None = None
-    best_epoch: int | None = None
-    best_val_f2: float | None = None
-
-
-class Notebook05PredictionResponse(BaseModel):
-    """Prediksi arah harga hari berikutnya dari model notebook05 terlatih
-    (varian sentimen/ohlcv), mirror `DirectionPredictionResponse` produksi."""
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "variant": "sentiment",
-                "as_of_date": "2024-03-01",
-                "target_date": "2024-03-02",
-                "direction": "up",
-                "probability_up": 0.67,
-                "confidence": 0.67,
-                "window": 20,
-                "feature_cols": ["Open", "High", "Low", "Close", "Volume", "sentiment_mean"],
-                "trained_at": "2026-07-12T00:00:00+00:00",
-                "best_val_f2": 0.8110,
-            }
-        }
-    )
-
-    variant: Literal["sentiment", "ohlcv"]
-    as_of_date: str
-    target_date: str
-    direction: Literal["up", "down"]
-    probability_up: float = Field(..., ge=0, le=1)
-    confidence: float = Field(..., ge=0, le=1)
-    window: int
-    feature_cols: list[str]
-    trained_at: str | None = None
-    best_val_f2: float | None = None
-
-
-class Notebook05BacktestResponse(BaseModel):
-    """Backtest model notebook05 terlatih (varian sentimen/ohlcv) pada data
-    historis — mirror `BacktestResponse` produksi, reuse `BacktestPoint`/
-    `ConfusionMatrix` (bentuknya identik)."""
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "variant": "sentiment",
-                "window": 20,
-                "split": "test",
-                "n_samples": 220,
-                "metrics": {"accuracy": 0.61, "precision": 0.76, "recall": 0.97, "f1": 0.85, "auc": 0.52},
-                "confusion_matrix": {"tp": 34, "tn": 0, "fp": 11, "fn": 1},
-                "points": [
-                    {
-                        "date": "2024-01-19",
-                        "close": 4839.81,
-                        "actual_direction": "up",
-                        "predicted_direction": "up",
-                        "probability_up": 0.72,
-                        "correct": True,
-                    }
-                ],
-            }
-        }
-    )
-
-    variant: Literal["sentiment", "ohlcv"]
-    window: int
-    split: str
-    n_samples: int
-    metrics: dict
-    confusion_matrix: ConfusionMatrix
-    points: list[BacktestPoint]
-
-
-# ---------------------------------------------------------------------------
 # Halaman Prediction — hasil Random Search skripsi-scoped (persisted) +
 # prediksi + backtest. Model A (baseline, OHLCV) / Model B (finbert, OHLCV+
-# sentimen). Field BEDA dari Notebook05*Response (tidak ada diagnosis/best_epoch,
-# ada window/best_val_acc) — sengaja TIDAK reuse schema notebook05.
+# sentimen).
 # ---------------------------------------------------------------------------
 
 class Notebook07ResultResponse(BaseModel):
@@ -308,6 +119,7 @@ class Notebook07ResultResponse(BaseModel):
                 "confusion_matrix": {"tn": 0, "fp": 99, "fn": 0, "tp": 126},
                 "best_val_f1": 0.619195,
                 "best_val_acc": 0.44843,
+                "eval_split": "val",
                 "split_sizes": {
                     "train_rows": 1085, "val_rows": 232, "test_rows": 234,
                     "train_samples": 1076, "val_samples": 223, "test_samples": 225,
@@ -323,8 +135,11 @@ class Notebook07ResultResponse(BaseModel):
     window: int | None = None
     metrics: dict | None = None
     confusion_matrix: dict | None = None
+    threshold: float | None = None
+    best_val_f1_macro: float | None = None
     best_val_f1: float | None = None
     best_val_acc: float | None = None
+    eval_split: Literal["val", "test"] | None = None
     split_sizes: dict | None = None
     trained_at: str | None = None
 

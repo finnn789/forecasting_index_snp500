@@ -1,10 +1,6 @@
 """
-tests/test_api/test_training.py — Test endpoint "API Training Live Notebook 05".
-
-(a) GET /api/v1/train/notebook05/grid-search-result — JSON biasa, envelope.
-(b) POST /api/v1/train/notebook05 — SSE, parse stream & cek tipe event
-    start/epoch/done. Dipakai config CEPAT (epochs=2) supaya tes tetap ringkas
-    di CPU/GPU manapun.
+tests/test_api/test_training.py — Test endpoint "Random Search Skripsi-Scoped"
+(notebook 07, Batasan Masalah BAB I skripsi).
 """
 
 from __future__ import annotations
@@ -22,45 +18,6 @@ def client():
     return TestClient(app)
 
 
-# ---------------------------------------------------------------------------
-# GET /api/v1/train/notebook05/grid-search-result
-# ---------------------------------------------------------------------------
-
-class TestGridSearchResultEndpoint:
-    def test_grid_search_result_envelope(self, client):
-        resp = client.get("/api/v1/train/notebook05/grid-search-result")
-        assert resp.status_code == 200, resp.text
-
-        body = resp.json()
-        assert body["success"] is True
-        assert "data" in body
-
-        data = body["data"]
-        assert data["total_combinations"] == 144
-        assert len(data["top_configs"]) == 10
-
-        best_config = data["best_config"]
-        assert best_config == {
-            "seq_len": 20,
-            "hidden_size": 64,
-            "num_layers": 2,
-            "dropout": 0.4,
-            "lr": 0.0005,
-            "batch_size": 64,
-            "epochs": 150,
-            "early_stop": 30,
-        }
-        assert data["best_val_f2"] == pytest.approx(0.811037)
-
-        # Baris pertama top_configs harus konsisten dgn best_val_f2
-        top1 = data["top_configs"][0]
-        assert top1["val_f2"] == pytest.approx(0.811037)
-
-
-# ---------------------------------------------------------------------------
-# POST /api/v1/train/notebook05 — SSE
-# ---------------------------------------------------------------------------
-
 def _parse_sse_events(lines) -> list[dict]:
     events = []
     for line in lines:
@@ -69,147 +26,6 @@ def _parse_sse_events(lines) -> list[dict]:
         payload = line[len("data: "):]
         events.append(json.loads(payload))
     return events
-
-
-class TestTrainNotebook05Stream:
-    def test_train_stream_fast_config(self, client):
-        """POST dengan override cepat — cek event start/epoch/done lengkap."""
-        with client.stream(
-            "POST",
-            "/api/v1/train/notebook05",
-            json={"epochs": 2, "early_stop": 50, "seq_len": 10},
-        ) as resp:
-            assert resp.status_code == 200
-            assert "text/event-stream" in resp.headers.get("content-type", "")
-            events = _parse_sse_events(resp.iter_lines())
-
-        types = [e["type"] for e in events]
-        assert "start" in types
-        assert types.count("epoch") >= 1
-        assert "done" in types
-        assert "error" not in types, f"Training gagal: {events}"
-
-        start_event = next(e for e in events if e["type"] == "start")
-        assert "total_epochs" in start_event
-        assert "config" in start_event
-        assert "device" in start_event
-        assert "split" in start_event
-        assert set(start_event["split"].keys()) == {
-            "train_rows", "val_rows", "test_rows",
-            "train_samples", "val_samples", "test_samples",
-        }
-
-        done_event = next(e for e in events if e["type"] == "done")
-        assert "metrics" in done_event
-        assert "confusion_matrix" in done_event
-        assert "diagnosis" in done_event
-        assert set(done_event["diagnosis"]["class_collapse"].keys()) == {"train", "val", "test"}
-        assert "artifact_paths" in done_event
-        assert set(done_event["artifact_paths"].keys()) == {"model", "scaler", "metadata"}
-
-
-# ---------------------------------------------------------------------------
-# POST /api/v1/train/notebook05/ohlcv — SSE (varian ablation, tanpa sentimen)
-# ---------------------------------------------------------------------------
-
-class TestTrainNotebook05OhlcvStream:
-    def test_train_stream_ohlcv_fast_config(self, client):
-        """POST varian OHLCV-only dengan override cepat — cek event lengkap
-        & artefak terisolasi (prefix nb05_ohlcv, beda dari varian sentimen)."""
-        with client.stream(
-            "POST",
-            "/api/v1/train/notebook05/ohlcv",
-            json={"epochs": 2, "early_stop": 50, "seq_len": 10},
-        ) as resp:
-            assert resp.status_code == 200
-            assert "text/event-stream" in resp.headers.get("content-type", "")
-            events = _parse_sse_events(resp.iter_lines())
-
-        types = [e["type"] for e in events]
-        assert "start" in types
-        assert types.count("epoch") >= 1
-        assert "done" in types
-        assert "error" not in types, f"Training gagal: {events}"
-
-        done_event = next(e for e in events if e["type"] == "done")
-        assert "metrics" in done_event
-        assert "confusion_matrix" in done_event
-        assert "diagnosis" in done_event
-        assert "artifact_paths" in done_event
-        artifact_paths = done_event["artifact_paths"]
-        assert set(artifact_paths.keys()) == {"model", "scaler", "metadata"}
-        assert "nb05_ohlcv" in artifact_paths["model"]
-        assert "nb05_ohlcv" in artifact_paths["scaler"]
-        assert "nb05_ohlcv" in artifact_paths["metadata"]
-
-
-# ---------------------------------------------------------------------------
-# Halaman Prediction — GET .../result, POST .../predict, GET .../backtest
-# (varian sentimen & OHLCV-only). Artefak SUDAH ADA di disk dari training
-# sesi sebelumnya (lstm_nb05_*/_ohlcv_*) — tidak training ulang di sini.
-# ---------------------------------------------------------------------------
-
-class TestNotebook05ResultEndpoint:
-    def test_result_sentiment_is_available(self, client):
-        resp = client.get("/api/v1/train/notebook05/result")
-        assert resp.status_code == 200, resp.text
-        data = resp.json()["data"]
-        assert data["is_available"] is True
-        assert "sentiment_mean" in data["feature_cols"]
-        assert "metrics" in data
-        assert "confusion_matrix" in data
-        assert "diagnosis" in data
-
-    def test_result_ohlcv_is_available(self, client):
-        resp = client.get("/api/v1/train/notebook05/ohlcv/result")
-        assert resp.status_code == 200, resp.text
-        data = resp.json()["data"]
-        assert data["is_available"] is True
-        assert "sentiment_mean" not in data["feature_cols"]
-
-
-class TestNotebook05PredictEndpoint:
-    def test_predict_sentiment(self, client):
-        resp = client.post("/api/v1/train/notebook05/predict")
-        assert resp.status_code == 200, resp.text
-        data = resp.json()["data"]
-        assert data["variant"] == "sentiment"
-        assert data["direction"] in ("up", "down")
-        assert 0.0 <= data["probability_up"] <= 1.0
-        assert 0.0 <= data["confidence"] <= 1.0
-        assert "sentiment_mean" in data["feature_cols"]
-
-    def test_predict_ohlcv(self, client):
-        resp = client.post("/api/v1/train/notebook05/ohlcv/predict")
-        assert resp.status_code == 200, resp.text
-        data = resp.json()["data"]
-        assert data["variant"] == "ohlcv"
-        assert data["direction"] in ("up", "down")
-        assert "sentiment_mean" not in data["feature_cols"]
-
-
-class TestNotebook05BacktestEndpoint:
-    def test_backtest_sentiment(self, client):
-        resp = client.get("/api/v1/train/notebook05/backtest", params={"split": "test"})
-        assert resp.status_code == 200, resp.text
-        data = resp.json()["data"]
-        assert data["variant"] == "sentiment"
-        assert data["split"] == "test"
-        assert data["n_samples"] == len(data["points"])
-        assert set(data["confusion_matrix"].keys()) == {"tp", "tn", "fp", "fn"}
-        if data["points"]:
-            point = data["points"][0]
-            assert set(point.keys()) == {
-                "date", "close", "actual_direction", "predicted_direction",
-                "probability_up", "correct",
-            }
-
-    def test_backtest_ohlcv(self, client):
-        resp = client.get("/api/v1/train/notebook05/ohlcv/backtest", params={"split": "test"})
-        assert resp.status_code == 200, resp.text
-        data = resp.json()["data"]
-        assert data["variant"] == "ohlcv"
-        assert data["n_samples"] == len(data["points"])
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +123,92 @@ class TestTrainSkripsiFinbertStream:
 
         done_event = next(e for e in events if e["type"] == "done")
         _assert_skripsi_done_event(done_event, "finbert_lstm_skripsi")
+
+
+# ---------------------------------------------------------------------------
+# Training Manual (1-konfigurasi fixed, BUKAN Random Search) — dipakai fitur
+# "Training Manual" & "Retrain dengan Best Config" FE.
+# ---------------------------------------------------------------------------
+
+_MANUAL_CONFIG = {
+    "hidden_size": 16,
+    "num_layers": 1,
+    "dropout": 0.3,
+    "optimizer": "adam",
+    "activation": "relu",
+    "lr": 0.001,
+    "epochs": 1,
+    "batch_size": 32,
+}
+
+
+def _assert_manual_done_event(done_event: dict, artifact_substr: str) -> None:
+    assert set(done_event["metrics"].keys()) == {"accuracy", "precision", "recall", "f1"}
+    assert "confusion_matrix" in done_event
+    assert set(done_event["confusion_matrix"].keys()) == {"tn", "fp", "fn", "tp"}
+    assert done_event["config"]["hidden_size"] == _MANUAL_CONFIG["hidden_size"]
+    assert "final_test_f1" in done_event
+    assert "final_test_acc" in done_event
+    assert "artifact_paths" in done_event
+    artifact_paths = done_event["artifact_paths"]
+    assert set(artifact_paths.keys()) == {"model", "scaler", "metadata"}
+    for path in artifact_paths.values():
+        assert artifact_substr in path
+
+
+class TestTrainSkripsiBaselineManualStream:
+    def test_train_manual_stream_flat_events(self, client):
+        """Event SSE flat (start/epoch/done) — TIDAK ada iteration_start/
+        iteration_end (beda dari Random Search)."""
+        with client.stream(
+            "POST",
+            "/api/v1/train/skripsi/ohlcv/manual",
+            json=_MANUAL_CONFIG,
+        ) as resp:
+            assert resp.status_code == 200
+            assert "text/event-stream" in resp.headers.get("content-type", "")
+            events = _parse_sse_events(resp.iter_lines())
+
+        types = [e["type"] for e in events]
+        assert types.count("start") == 1
+        assert "iteration_start" not in types
+        assert "iteration_end" not in types
+        assert types.count("epoch") == _MANUAL_CONFIG["epochs"]
+        assert "done" in types
+        assert "error" not in types, f"Training gagal: {events}"
+
+        start_event = next(e for e in events if e["type"] == "start")
+        assert start_event["window"] == 10
+        assert start_event["config"] == _MANUAL_CONFIG
+        assert start_event["feature_cols"] == ["Open", "High", "Low", "Close", "Volume"]
+
+        done_event = next(e for e in events if e["type"] == "done")
+        _assert_manual_done_event(done_event, "lstm_baseline_skripsi")
+
+
+class TestTrainSkripsiFinbertManualStream:
+    def test_train_manual_stream_flat_events(self, client):
+        with client.stream(
+            "POST",
+            "/api/v1/train/skripsi/finbert-lstm/manual",
+            json=_MANUAL_CONFIG,
+        ) as resp:
+            assert resp.status_code == 200
+            assert "text/event-stream" in resp.headers.get("content-type", "")
+            events = _parse_sse_events(resp.iter_lines())
+
+        types = [e["type"] for e in events]
+        assert types.count("start") == 1
+        assert "iteration_start" not in types
+        assert types.count("epoch") == _MANUAL_CONFIG["epochs"]
+        assert "done" in types
+        assert "error" not in types, f"Training gagal: {events}"
+
+        start_event = next(e for e in events if e["type"] == "start")
+        assert start_event["feature_cols"] == ["Open", "High", "Low", "Close", "Volume", "sentiment_mean"]
+
+        done_event = next(e for e in events if e["type"] == "done")
+        _assert_manual_done_event(done_event, "finbert_lstm_skripsi")
 
 
 # ---------------------------------------------------------------------------

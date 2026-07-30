@@ -5,12 +5,11 @@ const IDLE = { data: null, loading: false, error: null }
 
 /**
  * Hook untuk halaman Prediction: hasil training model yang sudah dipersist
- * di backend (bukan React state) untuk satu varian — dipakai lintas 2
- * keluarga model (Notebook05 Training Live & Notebook07 Random Search).
+ * di backend (bukan React state) untuk satu varian (Model A/Model B).
  *
  * - `resultPath` di-fetch otomatis on mount (pola useDataAnalysis.js).
  * - `predict()`/`backtest()` dipicu manual lewat tombol (bukan auto-fetch),
- *   mirip pola `startTraining` di useTrainingStream.js.
+ *   mirip pola `startTraining` di useRandomSearchStream.js.
  */
 export function useModelResult(resultPath) {
   const [result, setResult] = useState({ data: null, loading: true, error: null })

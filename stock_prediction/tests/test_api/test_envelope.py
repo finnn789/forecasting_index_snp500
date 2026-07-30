@@ -237,6 +237,77 @@ class TestDataAnalysisEndpoints:
             body = assert_success_envelope(resp, expected_status=200)
             assert isinstance(body["data"], dict)
 
+    @pytest.mark.parametrize("split", ["train", "val", "test"])
+    def test_combined_scaled_preview_endpoint(self, client, split):
+        resp = client.get(
+            "/api/v1/data-analysis/combined/scaled-preview", params={"n": 5, "split": split}
+        )
+        body = assert_success_envelope(resp, expected_status=200)
+        assert body["data"]["split"] == split
+        assert "label" in body["data"]["columns"]
+
+    def test_combined_scaled_preview_invalid_split_returns_validation_error(self, client):
+        resp = client.get(
+            "/api/v1/data-analysis/combined/scaled-preview", params={"split": "bogus"}
+        )
+        assert_error_envelope(resp, expected_status=422)
+
+
+# ---------------------------------------------------------------------------
+# Test: Data Information Endpoints (notebooks/11_diagnostic_data_analysis_horizon.ipynb)
+# ---------------------------------------------------------------------------
+
+DATA_INFORMATION_MODEL_HORIZON_ENDPOINTS = [
+    "/api/v1/data-information/regime-overview",
+    "/api/v1/data-information/scaling-range",
+    "/api/v1/data-information/feature-label-correlation",
+    "/api/v1/data-information/distribution-drift",
+]
+
+DATA_INFORMATION_NO_PARAM_ENDPOINTS = [
+    "/api/v1/data-information/sentiment-lag-correlation",
+    "/api/v1/data-information/baseline-comparison",
+]
+
+
+class TestDataInformationEndpoints:
+    """Test /api/v1/data-information/* endpoints"""
+
+    @pytest.mark.parametrize("endpoint", DATA_INFORMATION_MODEL_HORIZON_ENDPOINTS)
+    @pytest.mark.parametrize("model", ["ohlcv", "joined"])
+    @pytest.mark.parametrize("horizon", [1, 5])
+    def test_model_horizon_endpoint(self, client, endpoint, model, horizon):
+        resp = client.get(endpoint, params={"model": model, "horizon": horizon})
+        body = assert_success_envelope(resp, expected_status=200)
+        assert isinstance(body["data"], dict)
+
+    @pytest.mark.parametrize("endpoint", DATA_INFORMATION_NO_PARAM_ENDPOINTS)
+    def test_no_param_endpoint(self, client, endpoint):
+        resp = client.get(endpoint)
+        body = assert_success_envelope(resp, expected_status=200)
+        assert isinstance(body["data"], dict)
+
+    def test_invalid_horizon_returns_validation_error(self, client):
+        resp = client.get(
+            "/api/v1/data-information/regime-overview",
+            params={"model": "joined", "horizon": 3},
+        )
+        assert_error_envelope(resp, expected_status=422)
+
+    def test_baseline_comparison_test_metrics_present(self, client):
+        resp = client.get("/api/v1/data-information/baseline-comparison")
+        body = assert_success_envelope(resp, expected_status=200)
+        test_rows = [r for r in body["data"]["rows"] if r["split"] == "test"]
+        assert len(test_rows) == 4  # 2 model x 2 horizon
+        assert all(r["model_trained"] for r in test_rows)
+        assert all(r["model_accuracy"] is not None for r in test_rows)
+
+    def test_label_balance_rolling_window_default(self, client):
+        resp = client.get("/api/v1/data-information/label-balance", params={"horizon": 1})
+        body = assert_success_envelope(resp, expected_status=200)
+        assert body["data"]["rolling_window"] == 60
+        assert len(body["data"]["models"]) == 2
+
 
 # ---------------------------------------------------------------------------
 # Test: Error Handling

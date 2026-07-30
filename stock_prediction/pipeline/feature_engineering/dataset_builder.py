@@ -12,13 +12,17 @@ Menyediakan:
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from dotenv import load_dotenv
 from sklearn.preprocessing import MinMaxScaler
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +30,18 @@ logger = logging.getLogger(__name__)
 # Konstanta
 # ---------------------------------------------------------------------------
 
-STOCK_CSV     = "data/processed/stocks/GSPC_2008_2024.csv"
+# Rentang file OHLCV dipilih via env var STOCK_DATA_RANGE (lihat .env.example)
+# — dibaca langsung (bukan lewat app.core.settings) supaya pipeline/ tetap
+# independen dari layer app/ (batas arsitektur, lihat CLAUDE.md).
+_VALID_STOCK_RANGES = {"2018_2024", "2008_2024"}
+STOCK_DATA_RANGE = os.getenv("STOCK_DATA_RANGE", "2018_2024")
+if STOCK_DATA_RANGE not in _VALID_STOCK_RANGES:
+    raise ValueError(
+        f"STOCK_DATA_RANGE tidak valid: {STOCK_DATA_RANGE!r}. "
+        f"Pilihan: {sorted(_VALID_STOCK_RANGES)}"
+    )
+
+STOCK_CSV     = f"data/processed/stocks/GSPC_{STOCK_DATA_RANGE}.csv"
 SENTIMENT_CSV = "data/processed/sentiment/headlines_daily_sentiment.csv"
 FEATURE_COLS  = ["Open", "High", "Low", "Close", "Volume", "sentiment_mean"]
 OHLCV_FEATURE_COLS = ["Open", "High", "Low", "Close", "Volume"]
@@ -153,6 +168,53 @@ def load_ohlcv_only() -> pd.DataFrame:
         df["Date"].max().date(),
     )
     return df
+
+
+# ---------------------------------------------------------------------------
+# load_return_features
+# ---------------------------------------------------------------------------
+
+RETURN_FEATURE_COLS_A = ["ret_open", "ret_high", "ret_low", "ret_close", "ret_volume"]
+RETURN_FEATURE_COLS_B = RETURN_FEATURE_COLS_A + ["sentiment_mean"]
+
+
+def load_return_features() -> pd.DataFrame:
+    """
+    Fitur return harian (pct_change) dari OHLCV + sentimen — GANTI fitur harga
+    level (non-stasioner) yang dipakai `load_joined()`. Mengatasi temuan
+    notebook 11: harga level `Open/High/Low/Close` terus naik (all-time high
+    berulang) sehingga 13.5% baris test ter-scaling di luar [0,1] (MinMaxScaler
+    fit-train-only) dan korelasi fitur-label berbalik tanda train->test.
+
+    `Close` (level, BUKAN return) tetap disertakan di kolom output — dibutuhkan
+    `load_split_capped()` untuk menghitung label horizon
+    (`Close[t+H] > Close[t]`), BUKAN dipakai sebagai fitur model.
+
+    Returns
+    -------
+    DataFrame dengan kolom: Date, ret_open, ret_high, ret_low, ret_close,
+    ret_volume, sentiment_mean, Close
+    """
+    df = load_joined()
+
+    df["ret_open"] = df["Open"].pct_change()
+    df["ret_high"] = df["High"].pct_change()
+    df["ret_low"] = df["Low"].pct_change()
+    df["ret_close"] = df["Close"].pct_change()
+    df["ret_volume"] = df["Volume"].pct_change()
+
+    ret_cols = ["ret_open", "ret_high", "ret_low", "ret_close", "ret_volume"]
+    # inf (dari hari dgn Volume=0) -> NaN -> dibuang (bukan diisi 0)
+    df[ret_cols] = df[ret_cols].replace([np.inf, -np.inf], np.nan)
+    df = df.dropna(subset=ret_cols).reset_index(drop=True)
+
+    logger.info(
+        "Return-features dataset: %d rows (%s – %s)",
+        len(df),
+        df["Date"].min().date(),
+        df["Date"].max().date(),
+    )
+    return df[["Date", *ret_cols, "sentiment_mean", "Close"]]
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,6 @@
 /**
- * Confusion matrix 2x2 (kelas positif = "up") — reusable oleh TrainingPanel
- * (hasil training live SSE) dan PredictionPanel (hasil training persisted +
- * backtest).
+ * Confusion matrix 2x2 (kelas positif = "up") — dipakai PredictionPanel
+ * (hasil training persisted + backtest).
  */
 export default function ConfusionMatrixGrid({ cm }) {
   if (!cm) return null

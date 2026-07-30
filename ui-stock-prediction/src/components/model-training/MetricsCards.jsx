@@ -1,10 +1,9 @@
 import Card, { CardContent } from '../Card'
 
 /**
- * Grid kartu metrik reusable — dipakai TrainingPanel (hasil training live SSE)
- * dan PredictionPanel (hasil training persisted + backtest). Caller yang
- * memformat `value` (mis. via fmtPct/fmtNum) supaya komponen ini tetap murni
- * presentational.
+ * Grid kartu metrik reusable — dipakai PredictionPanel (hasil training
+ * persisted + backtest). Caller yang memformat `value` (mis. via
+ * fmtPct/fmtNum) supaya komponen ini tetap murni presentational.
  */
 export default function MetricsCards({ entries }) {
   return (

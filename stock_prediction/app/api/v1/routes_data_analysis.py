@@ -13,9 +13,12 @@ from fastapi import APIRouter, Query
 
 from app.core.envelope import EnvelopeRoute
 from app.schemas.data_analysis import (
-    CombinedMergeInfo,
     CombinedMergePreviewResponse,
     CombinedPipelineStepsResponse,
+    CombinedScaledPreviewResponse,
+    DatasetBuildResponse,
+    DatasetStatusResponse,
+    SentimentCleanPreviewResponse,
     SentimentClosingPriceResponse,
     SentimentDailyAggregationResponse,
     SentimentHeadlineLengthResponse,
@@ -201,6 +204,22 @@ async def sentiment_raw_preview(
 
 
 @router.get(
+    "/data-analysis/sentiment/clean-preview",
+    response_model=SentimentCleanPreviewResponse,
+    summary="Cuplikan N Baris Pertama Hasil Scoring FinBERT",
+    description=(
+        "Butuh headlines_clean.csv (hasil scoring FinBERT) sudah ada — jalankan "
+        "POST /sentiment/pipeline/run terlebih dahulu jika belum."
+    ),
+    openapi_extra={"x-message": "Cuplikan hasil scoring FinBERT berhasil dimuat"},
+)
+async def sentiment_clean_preview(
+    n: int = Query(10, ge=1, le=100, description="Jumlah baris pertama yang ditampilkan"),
+) -> SentimentCleanPreviewResponse:
+    return svc.get_sentiment_clean_preview(n)
+
+
+@router.get(
     "/data-analysis/sentiment/news-per-year",
     response_model=SentimentNewsPerYearResponse,
     summary="Distribusi Berita per Tahun",
@@ -298,21 +317,6 @@ async def sentiment_method_comparison() -> SentimentMethodComparisonResponse:
 # ---------------------------------------------------------------------------
 
 @router.get(
-    "/data-analysis/combined/merge-info",
-    response_model=CombinedMergeInfo,
-    summary="Info Penggabungan OHLCV + Sentiment Mean",
-    description=(
-        "Ringkasan hasil inner join OHLCV (setelah StockPreprocessor.clean()) dengan "
-        "sentiment_mean harian — logic identik dengan dataset_builder.py::load_joined() "
-        "yang dipakai model untuk training & inference."
-    ),
-    openapi_extra={"x-message": "Info penggabungan OHLCV + sentiment berhasil dimuat"},
-)
-async def combined_merge_info() -> CombinedMergeInfo:
-    return svc.get_combined_merge_info()
-
-
-@router.get(
     "/data-analysis/combined/merge-preview",
     response_model=CombinedMergePreviewResponse,
     summary="Cuplikan N Baris Pertama Data Gabungan OHLCV + Sentiment Mean",
@@ -325,16 +329,87 @@ async def combined_merge_preview(
 
 
 @router.get(
+    "/data-analysis/combined/scaled-preview",
+    response_model=CombinedScaledPreviewResponse,
+    summary="Cuplikan Data Setelah MinMaxScaling (Siap Training)",
+    description=(
+        "Data gabungan setelah labeling (horizon 5 hari) + split kronologis + "
+        "capping outlier (IQR, fit train-only) + MinMaxScaler (fit train-only) — "
+        "bentuk fitur persis sebelum windowing masuk ke model. Mirror langkah "
+        "5-7 dari /combined/pipeline-steps."
+    ),
+    openapi_extra={"x-message": "Cuplikan data siap training berhasil dimuat"},
+)
+async def combined_scaled_preview(
+    n: int = Query(10, ge=1, le=100, description="Jumlah baris pertama yang ditampilkan"),
+    split: str = Query("train", description="Split data: train, val, atau test"),
+    variant: str = Query("finbert", description="Varian model: baseline (Model A) atau finbert (Model B)"),
+    split_mode: str = Query(
+        "random_search", description="Rasio split: random_search (70/15/15) atau manual (80/20)"
+    ),
+) -> CombinedScaledPreviewResponse:
+    return svc.get_combined_scaled_preview(n, split, variant, split_mode)
+
+
+@router.get(
     "/data-analysis/combined/pipeline-steps",
     response_model=CombinedPipelineStepsResponse,
     summary="Langkah-Langkah Preprocessing Dataset Gabungan",
     description=(
-        "Mencerminkan dataset_builder.py::build_dataset() (load & clean OHLCV, "
-        "load sentimen, inner join, labeling, split by date, MinMaxScaler "
-        "fit train-only, windowing) versi ringan — tanpa torch & tanpa array "
-        "windowing sungguhan, hanya jumlah sampel."
+        "Mencerminkan PERSIS dataset_builder.py::load_return_features() + "
+        "notebook07_common.py::load_split_capped() (load & clean OHLCV, load "
+        "sentimen, inner join, fitur return, labeling horizon-5, split "
+        "kronologis, capping outlier IQR, MinMaxScaler fit train-only, "
+        "windowing) — fungsi ASLI yang dipakai training sungguhan, versi ringan "
+        "tanpa torch & tanpa array windowing sungguhan (hanya jumlah sampel)."
     ),
     openapi_extra={"x-message": "Langkah preprocessing dataset gabungan berhasil dimuat"},
 )
-async def combined_pipeline_steps() -> CombinedPipelineStepsResponse:
-    return svc.get_combined_pipeline_steps()
+async def combined_pipeline_steps(
+    variant: str = Query("finbert", description="Varian model: baseline (Model A) atau finbert (Model B)"),
+    split_mode: str = Query(
+        "random_search", description="Rasio split: random_search (70/15/15) atau manual (80/20)"
+    ),
+) -> CombinedPipelineStepsResponse:
+    return svc.get_combined_pipeline_steps(variant, split_mode)
+
+
+@router.post(
+    "/data-analysis/combined/build-dataset",
+    response_model=DatasetBuildResponse,
+    summary="Bangun & Simpan Dataset Latih (Artifact)",
+    description=(
+        "Jalankan prepare_dataset_bundle() (join+fitur return+label+split+"
+        "capping+scaling+windowing) lalu simpan ke disk. Setelah ini, "
+        "POST /train/skripsi/{ohlcv,finbert-lstm}[/manual] varian & split_mode "
+        "yang sama akan MEMBACA artifact ini (bukan menghitung ulang)."
+    ),
+    openapi_extra={"x-message": "Dataset latih berhasil dibangun & disimpan"},
+)
+async def combined_build_dataset(
+    variant: str = Query("finbert", description="Varian model: baseline (Model A) atau finbert (Model B)"),
+    split_mode: str = Query(
+        "random_search", description="Rasio split: random_search (70/15/15) atau manual (80/20)"
+    ),
+) -> DatasetBuildResponse:
+    return svc.build_combined_dataset(variant, split_mode)
+
+
+@router.get(
+    "/data-analysis/combined/dataset-status",
+    response_model=DatasetStatusResponse,
+    summary="Status Artifact Dataset Latih",
+    description=(
+        "exists/is_fresh (dibandingkan fingerprint mtime+size GSPC_*.csv & "
+        "headlines_daily_sentiment.csv saat dataset dibangun) — dipakai badge "
+        "Workflow & gating tombol Run di halaman Model Training."
+    ),
+    openapi_extra={"x-message": "Status dataset latih berhasil dimuat"},
+)
+async def combined_dataset_status(
+    variant: str = Query("finbert", description="Varian model: baseline (Model A) atau finbert (Model B)"),
+    split_mode: str = Query(
+        "random_search", description="Rasio split: random_search (70/15/15) atau manual (80/20)"
+    ),
+) -> DatasetStatusResponse:
+    return svc.get_dataset_status(variant, split_mode)

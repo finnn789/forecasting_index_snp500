@@ -4,22 +4,22 @@ import { API_BASE } from '../utils/api'
 const INITIAL_STATE = {
   status: 'idle', // idle | running | done | error
   start: null, // payload event "start"
-  epochs: [], // list payload event "epoch"
+  config: null, // config yang sedang/sudah dilatih
+  epochs: [], // 1 entri per event "epoch" (training flat, 1 model — aman disimpan semua)
   result: null, // payload event "done"
   error: null,
 }
 
 /**
- * Hook untuk menjalankan training LSTM (Notebook 05) via SSE.
- * EventSource tidak bisa POST body, jadi stream dikonsumsi lewat fetch +
- * ReadableStream reader. Tiap event SSE berbentuk baris "data: {json}\n\n" —
- * dibaca per chunk, di-buffer, lalu di-split pada "\n\n".
+ * Hook untuk menjalankan Training Manual skripsi-scoped (1 konfigurasi fixed,
+ * BUKAN Random Search) via SSE. Stream FLAT — start -> epoch xN -> done/error
+ * (beda dari useRandomSearchStream yang bersarang 3 level) karena hanya 1
+ * model yang dilatih, bukan N kandidat per iterasi.
  */
-export function useTrainingStream(endpoint = '/train/notebook05') {
+export function useManualTrainStream(endpoint) {
   const [state, setState] = useState(INITIAL_STATE)
   const abortRef = useRef(null)
 
-  // Pastikan koneksi ditutup kalau komponen unmount saat masih running.
   useEffect(() => {
     return () => abortRef.current?.abort()
   }, [])
@@ -34,7 +34,7 @@ export function useTrainingStream(endpoint = '/train/notebook05') {
     const controller = new AbortController()
     abortRef.current = controller
 
-    setState({ status: 'running', start: null, epochs: [], result: null, error: null })
+    setState({ ...INITIAL_STATE, status: 'running' })
 
     try {
       const res = await fetch(`${API_BASE}${endpoint}`, {
@@ -93,7 +93,7 @@ export function useTrainingStream(endpoint = '/train/notebook05') {
 function applyEvent(event, setState) {
   switch (event.type) {
     case 'start':
-      setState((prev) => ({ ...prev, start: event }))
+      setState((prev) => ({ ...prev, start: event, config: event.config }))
       break
     case 'epoch':
       setState((prev) => ({ ...prev, epochs: [...prev.epochs, event] }))
