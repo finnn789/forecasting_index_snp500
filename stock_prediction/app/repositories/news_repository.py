@@ -6,24 +6,24 @@ from app.core.exceptions import NotFoundError
 from app.domain.value_objects import DateRange
 from .base import FileBasedRepository
 
-_RAW_FILENAME = "sp500_headlines_2008_2024.csv"
 _CLEAN_FILENAME = "headlines_clean.csv"
 
 
 class NewsRepository(FileBasedRepository):
-    def __init__(self, raw_dir: Path, processed_dir: Path) -> None:
+    def __init__(self, raw_dir: Path, processed_dir: Path, date_suffix: str = "2018_2024") -> None:
         super().__init__(raw_dir)
         self._raw_dir = Path(raw_dir)
         self._processed_dir = Path(processed_dir)
+        self._raw_filename = f"sp500_headlines_{date_suffix}.csv"
 
     def raw_headlines_path(self) -> Path:
-        return self._raw_dir / _RAW_FILENAME
+        return self._raw_dir / self._raw_filename
 
     def clean_headlines_path(self) -> Path:
         return self._processed_dir / _CLEAN_FILENAME
 
     def load_raw_headlines(self, date_range: DateRange | None = None) -> pd.DataFrame:
-        path = self._raw_dir / _RAW_FILENAME
+        path = self._raw_dir / self._raw_filename
         if not path.exists():
             raise NotFoundError(
                 f"File headlines mentah tidak ditemukan: {path}",

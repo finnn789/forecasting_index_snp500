@@ -115,6 +115,35 @@ def _make_windows(features: np.ndarray, labels: np.ndarray, window: int) -> tupl
 
 
 # ---------------------------------------------------------------------------
+# Helpers — sample weighting (opt-in, "soft deadband" berbasis magnitude
+# forward-return — TIDAK mengubah label naive, hanya menurunkan kontribusi
+# loss sampel yang pergerakannya kecil/ambigu). Divalidasi di notebooks
+# 17/18 (mengalahkan naive tanpa bobot: F1-macro 0.541 -> 0.616 pada
+# kombinasi theta_ref=0.005, w_min=0.20).
+# ---------------------------------------------------------------------------
+
+def compute_sample_weights(df: pd.DataFrame, horizon: int, theta_ref: float, w_min: float) -> np.ndarray:
+    """weight[t] = clip(|Close[t+horizon]/Close[t] - 1| / theta_ref, w_min, 1.0).
+    `df` harus punya kolom `Close`. `df` di sini SUDAH di-split (mis. `df_train`
+    saja) — `Close.shift(-horizon)` pada `horizon` baris TERAKHIR jadi NaN
+    (data masa depannya ada di df_val/df_test, sudah tidak terjangkau setelah
+    split), padahal baris-baris itu sendiri VALID (label-nya dihitung dari
+    deret waktu PENUH sebelum split, di `load_split_capped()`). `fillna(0.0)`
+    SEBELUM `abs()` supaya baris itu jatuh ke bobot minimum (`w_min`) alih-alih
+    NaN — NaN akan merambat ke `loss.backward()` dan merusak SELURUH training
+    (bukan cuma baris itu) begitu satu batch memuat sampel ini."""
+    fwd_return = (df["Close"].shift(-horizon) / df["Close"] - 1.0).fillna(0.0)
+    return np.clip(fwd_return.abs().values / theta_ref, w_min, 1.0).astype(np.float32)
+
+
+def _align_weights(values: np.ndarray, window: int, num_samples: int) -> np.ndarray:
+    """Sejajarkan array 1D (sample weight) dengan irisan indeks IDENTIK yang
+    dipakai `_make_windows()` untuk label — TANPA cast ke int64 (beda dari
+    `_make_windows`, yang memaksa label jadi integer)."""
+    return values[window - 1: window - 1 + num_samples].astype(np.float32)
+
+
+# ---------------------------------------------------------------------------
 # Helpers — Random Search sampling
 # ---------------------------------------------------------------------------
 
@@ -191,6 +220,47 @@ def _train_one_epoch(
         optimizer.zero_grad()
         logits = model(xb)
         loss = criterion(logits, yb)
+        loss.backward()
+        optimizer.step()
+
+        bs = xb.size(0)
+        total_loss += loss.item() * bs
+        n_samples += bs
+
+        preds = logits.argmax(dim=1).detach().cpu().numpy()
+        y_true_all.extend(yb.detach().cpu().numpy().tolist())
+        y_pred_all.extend(preds.tolist())
+
+    avg_loss = total_loss / n_samples if n_samples else 0.0
+    acc = accuracy_score(y_true_all, y_pred_all) if n_samples else 0.0
+    return avg_loss, float(acc)
+
+
+def _train_one_epoch_weighted(
+    model: nn.Module,
+    loader: DataLoader,
+    optimizer: torch.optim.Optimizer,
+    class_weights: torch.Tensor,
+    device: torch.device,
+) -> tuple[float, float]:
+    """Mirror `_train_one_epoch` di atas, TAPI loader mengeluarkan 3-tuple
+    (xb, yb, wb) — wb = sample weight per-baris (lihat `compute_sample_weights`)
+    dikalikan ke loss per-sampel SEBELUM dirata-rata (weighted mean, bukan
+    mean biasa). `_train_one_epoch` yang sudah ada TIDAK diubah/dihapus —
+    fungsi ini dipakai HANYA saat `use_sample_weighting=True`."""
+    model.train()
+    ce = nn.CrossEntropyLoss(weight=class_weights, reduction="none")
+    total_loss = 0.0
+    n_samples = 0
+    y_true_all: list[int] = []
+    y_pred_all: list[int] = []
+
+    for xb, yb, wb in loader:
+        xb, yb, wb = xb.to(device), yb.to(device), wb.to(device)
+        optimizer.zero_grad()
+        logits = model(xb)
+        per_sample_loss = ce(logits, yb)
+        loss = (per_sample_loss * wb).sum() / wb.sum()
         loss.backward()
         optimizer.step()
 
@@ -327,6 +397,8 @@ class DatasetBundle:
     train_ratio: float
     val_ratio: float
     split_sizes: dict[str, int]
+    sample_weight_train: np.ndarray | None = None
+    sample_weighting: dict[str, float] | None = None
 
 
 def prepare_dataset_bundle(
@@ -337,11 +409,21 @@ def prepare_dataset_bundle(
     train_ratio: float,
     val_ratio: float,
     window: int,
+    theta_ref: float | None = None,
+    w_min: float = 0.2,
 ) -> DatasetBundle:
     """load_split_capped() -> MinMaxScaler (fit train-only) -> windowing.
     Dipanggil live oleh run_notebook07_training()/run_notebook07_manual_training()
     (bila tidak diberi `prebuilt_dataset`) DAN oleh save_dataset_bundle() saat
-    tombol "Bangun Dataset Latih" (Workflow) diklik."""
+    tombol "Bangun Dataset Latih" (Workflow) diklik.
+
+    `theta_ref`/`w_min` OPSIONAL (default `theta_ref=None`) — kalau `None`,
+    `sample_weight_train` di bundle hasil TETAP `None` dan perilaku IDENTIK
+    dengan sebelum parameter ini ada (backward compatible, tidak mengubah
+    caller manapun yang tidak mengirim argumen ini). Kalau `theta_ref`
+    diisi, dihitung bobot loss per-sampel training (lihat
+    `compute_sample_weights` — divalidasi notebooks 17/18, TIDAK mengubah
+    label, hanya bobot gradien saat training)."""
     df_train, df_val, df_test, capping_bounds, n_capped = load_split_capped(
         load_data_fn, capping_cols, horizon, train_ratio=train_ratio, val_ratio=val_ratio,
     )
@@ -362,6 +444,13 @@ def prepare_dataset_bundle(
     X_train, y_train = _make_windows(train_feat, df_train["label"].values, window)
     X_val, y_val = _make_windows(val_feat, df_val["label"].values, window)
     X_test, y_test = _make_windows(test_feat, df_test["label"].values, window)
+
+    sample_weight_train = None
+    sample_weighting = None
+    if theta_ref is not None and len(X_train) > 0:
+        row_weights = compute_sample_weights(df_train, horizon, theta_ref, w_min)
+        sample_weight_train = _align_weights(row_weights, window, len(y_train))
+        sample_weighting = {"theta_ref": theta_ref, "w_min": w_min}
 
     split_sizes = {
         "train_rows": len(df_train),
@@ -384,6 +473,8 @@ def prepare_dataset_bundle(
         train_ratio=train_ratio,
         val_ratio=val_ratio,
         split_sizes=split_sizes,
+        sample_weight_train=sample_weight_train,
+        sample_weighting=sample_weighting,
     )
 
 
@@ -562,6 +653,7 @@ def run_notebook07_training(
             "total_iterations": n_iter,
             "window": window,
             "horizon": horizon,
+            "seed": seed,
             "search_space": search_space,
             "feature_cols": feature_cols,
             "device": device.type,
@@ -727,6 +819,7 @@ def run_notebook07_training(
             "feature_cols": feature_cols,
             "window": window,
             "horizon": horizon,
+            "seed": seed,
             "metrics": metrics,
             "confusion_matrix": confusion,
             "threshold": _r6(best_threshold),
@@ -750,6 +843,7 @@ def run_notebook07_training(
         done_payload = {
             "type": "done",
             "best_config": best_config,
+            "seed": seed,
             "threshold": _r6(best_threshold),
             "best_val_f1_macro": _r6(best["val_f1_macro"]),
             "best_val_f1": _r6(best["val_f1"]),
@@ -795,7 +889,14 @@ def run_notebook07_manual_training(
     metadata_filename: str,
     seed: int = 42,
     horizon: int = 1,
+    train_ratio: float = 0.80,
     prebuilt_dataset: DatasetBundle | None = None,
+    use_sample_weighting: bool = False,
+    theta_ref: float = 0.005,
+    w_min: float = 0.2,
+    min_epochs: int = 20,
+    patience: int = 15,
+    val_ratio_inner: float = 0.15,
 ) -> dict:
     """Latih 1 model dengan `config` yang sudah ditentukan (bukan hasil sampling
     Random Search) dan stream progress via `emit()`. Event: "start" ->
@@ -805,19 +906,46 @@ def run_notebook07_manual_training(
     hidden_size, num_layers, dropout, optimizer, activation, lr, epochs,
     batch_size.
 
-    Split Train:Test 80:20 (TANPA val) — beda dari `run_notebook07_training()`
-    (Random Search, 70/15/15) karena training manual/final tidak melakukan
-    seleksi konfigurasi (tidak butuh val terpisah dari test); `config` sudah
-    fixed sejak awal (input bebas FE atau hasil `best_config` Random Search),
-    jadi metrik per-epoch yang dimonitor JUJUR disebut "test" (dihitung dari
-    20% test split), bukan "val" — tidak ada keputusan (seleksi/early-stop)
-    yang diambil dari angka ini selama training, jadi tidak ada kebocoran
-    metodologis walau dilaporkan live per-epoch.
+    Split Train:Test `train_ratio`:(1-`train_ratio`) (TANPA val) — beda dari
+    `run_notebook07_training()` (Random Search, tetap fixed 70/15/15) karena
+    training manual/final tidak melakukan seleksi konfigurasi (tidak butuh val
+    terpisah dari test); `config` sudah fixed sejak awal (input bebas FE atau
+    hasil `best_config` Random Search), jadi metrik per-epoch yang dimonitor
+    JUJUR disebut "test" (dihitung dari test split), bukan "val" — tidak ada
+    keputusan (seleksi/early-stop) yang diambil dari angka ini selama
+    training, jadi tidak ada kebocoran metodologis walau dilaporkan live
+    per-epoch.
 
-    `prebuilt_dataset` opsional — lihat docstring `run_notebook07_training()`.
-    Bila diisi, HARUS dataset hasil `split_mode="manual"` (train_ratio=0.80,
-    val_ratio=0.0) — caller (`training_service.py`) bertanggung jawab
-    mengirim bundle yang sesuai.
+    Split dihitung LIVE setiap kali endpoint ini dipanggil (preprocessing
+    ringan, bukan artifact Workflow) — supaya user bebas ganti `train_ratio`
+    (0.6/0.7/0.8) tanpa perlu langkah "Bangun Dataset Latih" terpisah.
+
+    `prebuilt_dataset` opsional (dipakai test/skenario lain yang sudah punya
+    bundle siap pakai) — bila diisi, `train_ratio` di atas diabaikan karena
+    rasio split bundle tersebut yang jadi acuan.
+
+    `use_sample_weighting` OPSIONAL, default `False` — perilaku fungsi ini
+    PERSIS SAMA seperti sebelum parameter ini ada (tanpa bobot, tanpa early
+    stopping, selalu `config["epochs"]` penuh, threshold argmax/0.5). Kalau
+    `True`: (1) sampel training diberi bobot loss berbasis magnitude
+    forward-return (`theta_ref`/`w_min`, lihat `compute_sample_weights` —
+    TIDAK mengubah label, cuma kontribusi gradien); (2) `val_ratio_inner`
+    (default 0.15) dari PORSI TRAIN dipotong jadi validation internal
+    (kronologis, dari `train`, BUKAN dari `test` — test tetap 100% tidak
+    tersentuh sampai evaluasi akhir); (3) early stopping memantau
+    **`val_inner_loss`** (bukan test) — berhenti kalau tidak membaik selama
+    `patience` epoch berturut-turut (dihitung SETELAH `min_epochs`); bobot
+    checkpoint terbaik (val_inner_loss terendah) yang dipakai — ini deteksi
+    overfitting yang sebenarnya (train_loss turun terus sementara
+    val_inner_loss mulai naik = overfitting, training dihentikan sebelum
+    itu terjadi lebih jauh); (4) threshold keputusan dicari via
+    `sweep_best_threshold()` di **val_inner** (bukan test), baru dipakai
+    SEKALI ke test saat evaluasi akhir — tidak ada keputusan (stop/threshold)
+    yang pernah diambil dari test, jadi tidak ada kebocoran metodologis.
+    `test_loss`/`test_acc`/`test_f1` tetap dilaporkan tiap epoch (informasi
+    pasif, konsisten dgn desain lama) TAPI tidak lagi dipakai untuk apa pun.
+    Resep ini divalidasi di notebooks 17/18 (mengalahkan skema naive tanpa
+    bobot+threshold: F1-macro 0.541 -> 0.616).
 
     Return dict payload event "done"/"error" (tanpa key "type"), sama seperti
     `run_notebook07_training()`.
@@ -826,13 +954,22 @@ def run_notebook07_manual_training(
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # -------------------------------------------------------------
-        # 1-5. Load+label+split 80:20 (TANPA val) + capping outlier + scaling
-        # + windowing — dari prebuilt_dataset (artifact) kalau ada, else live.
+        # 1-5. Load+label+split Train:Test (TANPA val) + capping outlier +
+        # scaling + windowing — dari prebuilt_dataset kalau ada, else live.
         # -------------------------------------------------------------
         bundle = prebuilt_dataset or prepare_dataset_bundle(
             load_data_fn, capping_cols, feature_cols, horizon,
-            train_ratio=0.80, val_ratio=0.0, window=window,
+            train_ratio=train_ratio, val_ratio=0.0, window=window,
+            theta_ref=theta_ref if use_sample_weighting else None, w_min=w_min,
         )
+        if use_sample_weighting and bundle.sample_weight_train is None:
+            raise ValueError(
+                "use_sample_weighting=True tapi prebuilt_dataset tidak punya "
+                "sample_weight_train (dataset artifact dibangun sebelum fitur ini "
+                "ada / tanpa theta_ref). Bangun ulang dataset atau jangan kirim "
+                "prebuilt_dataset."
+            )
+
         X_train, y_train = bundle.X_train, bundle.y_train
         X_test, y_test = bundle.X_test, bundle.y_test
         scaler = bundle.scaler
@@ -843,9 +980,11 @@ def run_notebook07_manual_training(
             "type": "start",
             "window": window,
             "horizon": horizon,
+            "seed": seed,
             "config": config,
             "feature_cols": feature_cols,
             "device": device.type,
+            "sample_weighting": bundle.sample_weighting,
             "split": {
                 "train_rows": bundle.split_sizes["train_rows"],
                 "test_rows": bundle.split_sizes["test_rows"],
@@ -859,7 +998,10 @@ def run_notebook07_manual_training(
         })
 
         # -------------------------------------------------------------
-        # 6. Training — 1 model, config fixed (TIDAK ada sampling/seleksi)
+        # 6. Training — 1 model, config fixed (TIDAK ada sampling/seleksi).
+        # Cabang `use_sample_weighting` pakai loss berbobot + early stopping
+        # (monitor test_loss, patience) — cabang default TIDAK berubah sama
+        # sekali dari perilaku sebelumnya.
         # -------------------------------------------------------------
         torch.manual_seed(seed)
         model = FlexibleLSTMClassifier(
@@ -875,40 +1017,128 @@ def run_notebook07_manual_training(
         class_weights = compute_class_weights(y_train, device)
         criterion = nn.CrossEntropyLoss(weight=class_weights)
 
-        train_ds = TensorDataset(torch.from_numpy(X_train), torch.from_numpy(y_train))
         test_ds = TensorDataset(torch.from_numpy(X_test), torch.from_numpy(y_test))
-        train_loader = DataLoader(train_ds, batch_size=config["batch_size"], shuffle=True)
         test_loader = DataLoader(test_ds, batch_size=config["batch_size"], shuffle=False)
 
         final_test_acc = 0.0
         final_test_f1 = 0.0
+        stopped_epoch = config["epochs"]
+        decision_threshold: float | None = None  # None -> argmax (perilaku lama)
+        val_inner_f1_macro: float | None = None
 
-        for epoch in range(1, config["epochs"] + 1):
-            train_loss, train_acc = _train_one_epoch(model, train_loader, optimizer, criterion, device)
-            test_loss, test_acc, test_f1, _, _ = _evaluate_epoch(model, test_loader, criterion, device)
+        if use_sample_weighting:
+            # Potong val internal dari PORSI TRAIN (kronologis) — test TIDAK
+            # tersentuh sama sekali di sini.
+            n_train_total = len(X_train)
+            n_val_inner = max(1, int(n_train_total * val_ratio_inner))
+            n_train_inner = n_train_total - n_val_inner
+            if n_train_inner < 1:
+                raise ValueError(
+                    f"train_samples={n_train_total} terlalu sedikit untuk dipotong "
+                    f"val_ratio_inner={val_ratio_inner} — perbesar train_ratio atau "
+                    "kecilkan val_ratio_inner."
+                )
 
-            final_test_acc = test_acc
-            final_test_f1 = test_f1
+            X_train_inner, y_train_inner = X_train[:n_train_inner], y_train[:n_train_inner]
+            w_train_inner = bundle.sample_weight_train[:n_train_inner]
+            X_val_inner, y_val_inner = X_train[n_train_inner:], y_train[n_train_inner:]
+            X_val_inner_t = torch.from_numpy(X_val_inner).to(device)
 
-            emit({
-                "type": "epoch",
-                "epoch": epoch,
-                "total_epochs": config["epochs"],
-                "train_loss": _r6(train_loss),
-                "train_acc": _r6(train_acc),
-                "test_loss": _r6(test_loss),
-                "test_acc": _r6(test_acc),
-                "test_f1": _r6(test_f1),
-            })
+            train_ds = TensorDataset(
+                torch.from_numpy(X_train_inner), torch.from_numpy(y_train_inner),
+                torch.from_numpy(w_train_inner),
+            )
+            train_loader = DataLoader(train_ds, batch_size=config["batch_size"], shuffle=True)
+            val_inner_ds = TensorDataset(torch.from_numpy(X_val_inner), torch.from_numpy(y_val_inner))
+            val_inner_loader = DataLoader(val_inner_ds, batch_size=config["batch_size"], shuffle=False)
+
+            best_val_inner_loss = float("inf")
+            best_state = None
+            epochs_no_improve = 0
+
+            for epoch in range(1, config["epochs"] + 1):
+                train_loss, train_acc = _train_one_epoch_weighted(model, train_loader, optimizer, class_weights, device)
+                val_inner_loss, val_inner_acc, val_inner_f1, _, _ = _evaluate_epoch(model, val_inner_loader, criterion, device)
+                # test_loss/test_acc/test_f1: informasi PASIF saja (TIDAK dipakai
+                # early stopping/threshold) — dilaporkan konsisten dgn desain lama.
+                test_loss, test_acc, test_f1, _, _ = _evaluate_epoch(model, test_loader, criterion, device)
+
+                final_test_acc = test_acc
+                final_test_f1 = test_f1
+
+                emit({
+                    "type": "epoch",
+                    "epoch": epoch,
+                    "total_epochs": config["epochs"],
+                    "train_loss": _r6(train_loss),
+                    "train_acc": _r6(train_acc),
+                    "val_inner_loss": _r6(val_inner_loss),
+                    "val_inner_acc": _r6(val_inner_acc),
+                    "val_inner_f1": _r6(val_inner_f1),
+                    "test_loss": _r6(test_loss),
+                    "test_acc": _r6(test_acc),
+                    "test_f1": _r6(test_f1),
+                })
+
+                if val_inner_loss < best_val_inner_loss - 1e-5:
+                    best_val_inner_loss = val_inner_loss
+                    best_state = deepcopy({k: v.detach().cpu().clone() for k, v in model.state_dict().items()})
+                    epochs_no_improve = 0
+                else:
+                    if epoch >= min_epochs:
+                        epochs_no_improve += 1
+                    if epoch >= min_epochs and epochs_no_improve >= patience:
+                        stopped_epoch = epoch
+                        break
+
+            if best_state is not None:
+                model.load_state_dict(best_state)
+                # test_acc/test_f1 dilaporkan di "done" HARUS konsisten dgn bobot
+                # terbaik yang dipakai (bukan bobot epoch terakhir sebelum stop).
+                _, final_test_acc, final_test_f1, _, _ = _evaluate_epoch(model, test_loader, criterion, device)
+
+            # Threshold dicari di val_inner (bukan test), baru dipakai SEKALI ke
+            # test saat evaluasi akhir (Bagian 7) — nol kebocoran ke test.
+            model.eval()
+            with torch.no_grad():
+                val_inner_probs = torch.softmax(model(X_val_inner_t), dim=1)[:, 1].cpu().numpy()
+            decision_threshold, val_inner_f1_macro = sweep_best_threshold(y_val_inner, val_inner_probs)
+        else:
+            train_ds = TensorDataset(torch.from_numpy(X_train), torch.from_numpy(y_train))
+            train_loader = DataLoader(train_ds, batch_size=config["batch_size"], shuffle=True)
+
+            for epoch in range(1, config["epochs"] + 1):
+                train_loss, train_acc = _train_one_epoch(model, train_loader, optimizer, criterion, device)
+                test_loss, test_acc, test_f1, _, _ = _evaluate_epoch(model, test_loader, criterion, device)
+
+                final_test_acc = test_acc
+                final_test_f1 = test_f1
+
+                emit({
+                    "type": "epoch",
+                    "epoch": epoch,
+                    "total_epochs": config["epochs"],
+                    "train_loss": _r6(train_loss),
+                    "train_acc": _r6(train_acc),
+                    "test_loss": _r6(test_loss),
+                    "test_acc": _r6(test_acc),
+                    "test_f1": _r6(test_f1),
+                })
 
         # -------------------------------------------------------------
-        # 7. Evaluasi final di TEST (HANYA 4 metrik, sesuai Batasan Masalah)
+        # 7. Evaluasi final di TEST (HANYA 4 metrik, sesuai Batasan Masalah).
+        # `decision_threshold` (hasil sweep di val_inner) dipakai kalau ada
+        # (use_sample_weighting=True) — else argmax/0.5, PERSIS perilaku lama.
         # -------------------------------------------------------------
         model.eval()
         X_test_t = torch.from_numpy(X_test).to(device)
         with torch.no_grad():
             test_logits = model(X_test_t)
-            y_test_pred = test_logits.argmax(dim=1).cpu().numpy()
+            if decision_threshold is not None:
+                test_probs_up = torch.softmax(test_logits, dim=1)[:, 1].cpu().numpy()
+                y_test_pred = (test_probs_up >= decision_threshold).astype(int)
+            else:
+                y_test_pred = test_logits.argmax(dim=1).cpu().numpy()
 
         tn, fp, fn, tp = confusion_matrix(y_test, y_test_pred, labels=[0, 1]).ravel()
         metrics = {
@@ -917,6 +1147,11 @@ def run_notebook07_manual_training(
             "recall": _r6(recall_score(y_test, y_test_pred, zero_division=0)),
             "f1": _r6(f1_score(y_test, y_test_pred, zero_division=0)),
         }
+        if use_sample_weighting:
+            # HANYA ditambahkan saat opsi aktif — default HARUS tetap persis 4
+            # key (accuracy/precision/recall/f1), sesuai kontrak test existing
+            # (_assert_manual_done_event) yang mengecek exact-match set key.
+            metrics["f1_macro"] = _r6(f1_score(y_test, y_test_pred, average="macro", zero_division=0))
         confusion = {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)}
 
         # -------------------------------------------------------------
@@ -936,6 +1171,7 @@ def run_notebook07_manual_training(
             "config": config,
             "feature_cols": feature_cols,
             "window": window,
+            "threshold": decision_threshold if decision_threshold is not None else 0.5,
         }, model_path)
         joblib.dump(scaler, scaler_path)
 
@@ -945,6 +1181,7 @@ def run_notebook07_manual_training(
             "feature_cols": feature_cols,
             "window": window,
             "horizon": horizon,
+            "seed": seed,
             "metrics": metrics,
             "confusion_matrix": confusion,
             "best_val_f1": _r6(final_test_f1),
@@ -958,6 +1195,11 @@ def run_notebook07_manual_training(
                 "test_samples": bundle.split_sizes["test_samples"],
             },
             "trained_at": trained_at,
+            "sample_weighting": bundle.sample_weighting,
+            "stopped_epoch": stopped_epoch if use_sample_weighting else None,
+            "threshold": _r6(decision_threshold) if decision_threshold is not None else 0.5,
+            "val_inner_f1_macro": _r6(val_inner_f1_macro) if val_inner_f1_macro is not None else None,
+            "val_ratio_inner": val_ratio_inner if use_sample_weighting else None,
         }
         with open(metadata_path, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
@@ -971,11 +1213,16 @@ def run_notebook07_manual_training(
         done_payload = {
             "type": "done",
             "config": config,
+            "seed": seed,
             "final_test_f1": _r6(final_test_f1),
             "final_test_acc": _r6(final_test_acc),
             "metrics": metrics,
             "confusion_matrix": confusion,
             "artifact_paths": artifact_paths,
+            "sample_weighting": bundle.sample_weighting,
+            "stopped_epoch": stopped_epoch if use_sample_weighting else None,
+            "threshold": _r6(decision_threshold) if decision_threshold is not None else 0.5,
+            "val_inner_f1_macro": _r6(val_inner_f1_macro) if val_inner_f1_macro is not None else None,
         }
         emit(done_payload)
         return done_payload
@@ -1117,6 +1364,119 @@ def predict_latest_notebook07(
         "feature_cols": feature_cols,
         "trained_at": loaded["metadata"].get("trained_at"),
         "best_val_f1": loaded["metadata"].get("best_val_f1"),
+    }
+
+
+def _last_prediction_path(artifact_dir: str, metadata_filename: str) -> Path:
+    """Nama file prediksi tersimpan diturunkan dari `metadata_filename`, mis.
+    'lstm_baseline_skripsi_metadata.json' -> 'lstm_baseline_skripsi_last_prediction.json'."""
+    stem = metadata_filename.removesuffix("_metadata.json")
+    return Path(artifact_dir) / f"{stem}_last_prediction.json"
+
+
+def save_last_prediction(result: dict[str, Any], *, artifact_dir: str, metadata_filename: str) -> None:
+    """Simpan hasil `predict_latest_notebook07()` ("Prediksi Hari Berikutnya") ke
+    file JSON terpisah dari metadata training, supaya hasilnya tetap terlihat
+    walau halaman di-reload/pindah tab — bukan cuma hidup di state React.
+    Backtest SENGAJA TIDAK dipersist lewat fungsi ini (tetap ephemeral,
+    dihitung ulang tiap request)."""
+    path = _last_prediction_path(artifact_dir, metadata_filename)
+    payload = {k: v for k, v in result.items() if k != "trained"}
+    payload["saved_at"] = datetime.now(timezone.utc).isoformat()
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def load_last_prediction(*, artifact_dir: str, metadata_filename: str) -> dict[str, Any] | None:
+    """Baca prediksi terakhir yang tersimpan (`save_last_prediction`). Return
+    `None` kalau belum pernah ada prediksi tersimpan untuk varian ini, atau file
+    korup/tidak terbaca."""
+    path = _last_prediction_path(artifact_dir, metadata_filename)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def predict_live_notebook07(
+    *,
+    feature_cols: list[str],
+    capping_cols: list[str],
+    artifact_dir: str,
+    model_filename: str,
+    scaler_filename: str,
+    metadata_filename: str,
+    historical_load_data_fn: Callable[[], pd.DataFrame],
+    live_df: pd.DataFrame,
+    horizon: int = 1,
+) -> dict[str, Any]:
+    """Varian LIVE dari `predict_latest_notebook07()` — window prediksi diambil
+    dari `live_df` (hasil fetch+preprocessing live, lihat
+    `app/services/live_data_service.py`), TAPI capping bounds tetap dihitung
+    dari data historis RESMI (`historical_load_data_fn`, sama seperti
+    `predict_latest_notebook07`) supaya bounds konsisten dengan yang dipakai
+    training — data live TIDAK dipakai untuk menghitung bounds/scaler, HANYA
+    sebagai sumber window observasi terbaru. Return `{"trained": False}` kalau
+    belum pernah training, atau raise `ValueError` kalau `live_df` kurang dari
+    `window` baris (caller/`app.services` menangkap ini jadi error response)."""
+    loaded = load_trained_notebook07(
+        artifact_dir=artifact_dir,
+        model_filename=model_filename,
+        scaler_filename=scaler_filename,
+        metadata_filename=metadata_filename,
+    )
+    if loaded is None:
+        return {"trained": False}
+
+    window = loaded["window"]
+    if len(live_df) < window:
+        raise ValueError(
+            f"Data live hanya punya {len(live_df)} baris gabungan (OHLCV+sentimen), "
+            f"butuh minimal {window} baris untuk membentuk 1 window prediksi."
+        )
+
+    split_ratio = loaded["metadata"].get("split_ratio", {"train": 0.70, "val": 0.15})
+    df_train, _, _, capping_bounds, _ = load_split_capped(
+        historical_load_data_fn, capping_cols, horizon,
+        train_ratio=split_ratio["train"], val_ratio=split_ratio["val"],
+    )
+
+    df_latest = live_df.iloc[-window:].reset_index(drop=True)
+    if capping_bounds:
+        df_latest = apply_capping(df_latest, capping_bounds)
+
+    feat = loaded["scaler"].transform(df_latest[feature_cols].values.astype(np.float64))
+    X = feat[np.newaxis, :, :].astype(np.float32)
+
+    as_of_date = df_latest["Date"].iloc[-1]
+    as_of_str = as_of_date.strftime("%Y-%m-%d")
+    target_str = (as_of_date + pd.Timedelta(days=horizon)).strftime("%Y-%m-%d")
+
+    model = loaded["model"]
+    with torch.no_grad():
+        logits = model(torch.tensor(X, dtype=torch.float32))
+        probs = torch.softmax(logits, dim=1).numpy()[0]
+
+    p_up = float(probs[1])
+    threshold = loaded["metadata"].get("threshold", 0.5)
+    direction = "up" if p_up >= threshold else "down"
+    confidence = max(p_up, 1.0 - p_up)
+
+    return {
+        "trained": True,
+        "as_of_date": as_of_str,
+        "target_date": target_str,
+        "direction": direction,
+        "probability_up": _r6(p_up),
+        "confidence": _r6(confidence),
+        "window": window,
+        "feature_cols": feature_cols,
+        "trained_at": loaded["metadata"].get("trained_at"),
+        "best_val_f1": loaded["metadata"].get("best_val_f1"),
+        "rows_available": len(live_df),
+        "live_days_in_window": int(df_latest["sentiment_is_live"].sum())
+        if "sentiment_is_live" in df_latest.columns else None,
     }
 
 

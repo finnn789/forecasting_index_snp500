@@ -306,7 +306,7 @@ export default function Workflow() {
                 ? { label: 'Sudah Ditraining', tone: 'success' }
                 : { label: 'Belum Ditraining', tone: 'neutral' }
           }
-          linkTo="/"
+          linkTo="/training"
           linkLabel="Buka halaman Model Training →"
         >
           {(baselineResult.loading || finbertResult.loading) && <StageLoading />}
@@ -353,15 +353,15 @@ export default function Workflow() {
               : { label: 'Menunggu Training', tone: 'neutral' }
           }
           isLast
-          linkTo="/predictions"
-          linkLabel="Buka halaman Predictions →"
+          linkTo="/"
+          linkLabel="Buka halaman Prediksi →"
         >
           {!trainingAvailable && (
             <StagePending message="Belum ada model terlatih — jalankan tahap Training Model terlebih dahulu." />
           )}
           {trainingAvailable && (
             <p className="text-sm text-slate-600">
-              Model terlatih tersedia. Buka halaman Predictions untuk menjalankan prediksi hari berikutnya atau backtest.
+              Model terlatih tersedia. Buka halaman Prediksi untuk menjalankan prediksi hari berikutnya atau backtest.
             </p>
           )}
         </WorkflowStageCard>

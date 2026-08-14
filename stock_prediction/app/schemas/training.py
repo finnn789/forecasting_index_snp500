@@ -25,11 +25,18 @@ from app.schemas.prediction import BacktestPoint, ConfusionMatrix
 class SkripsiTrainRequest(BaseModel):
     """Override jumlah iterasi Random Search. Search space & window TIDAK
     dibuat configurable dari FE — tetap sesuai Batasan Masalah BAB I skripsi
-    (lihat models/lstm/notebook07_trainer.py). Default n_iter = 20."""
+    (lihat models/lstm/notebook07_trainer.py). Default n_iter = 20.
 
-    model_config = ConfigDict(json_schema_extra={"example": {"n_iter": 20}})
+    `seed` (opsional, default 42 kalau tidak dikirim) mengontrol DUA hal:
+    (1) urutan/isi kombinasi hyperparameter yang di-sample tiap iterasi
+    (`np.random.default_rng(seed)`), dan (2) inisialisasi bobot model +
+    urutan shuffle DataLoader per iterasi (`torch.manual_seed(seed + i)`) —
+    kirim seed yang sama untuk hasil yang reproducible antar run."""
+
+    model_config = ConfigDict(json_schema_extra={"example": {"n_iter": 20, "seed": 42}})
 
     n_iter: int | None = None
+    seed: int | None = None
 
 
 class ManualTrainRequest(BaseModel):
@@ -38,14 +45,23 @@ class ManualTrainRequest(BaseModel):
     Random Search). Berbeda dari `SkripsiTrainRequest`: SEMUA hyperparameter
     wajib dikirim FE, TIDAK ada sampling/pencarian. Validasi hanya batas wajar
     (positif, dropout<1) — nilai TIDAK dibatasi ke pilihan diskrit search space
-    Random Search (sesuai keputusan: input manual bersifat bebas)."""
+    Random Search (sesuai keputusan: input manual bersifat bebas).
+
+    `train_ratio` memilih rasio split Train:Test (TANPA val, sama seperti
+    sebelumnya) — split dihitung LIVE saat request ini diproses (bukan baca
+    artifact Workflow), karena preprocessing-nya ringan dan training manual
+    tidak butuh val terpisah (tidak ada seleksi config).
+
+    `seed` (opsional, default 42 kalau tidak dikirim) — `torch.manual_seed(seed)`
+    dipanggil sebelum inisialisasi model, jadi bobot awal + urutan shuffle
+    DataLoader reproducible untuk seed yang sama."""
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "hidden_size": 64, "num_layers": 1, "dropout": 0.3,
                 "optimizer": "adam", "activation": "relu", "lr": 0.001,
-                "epochs": 30, "batch_size": 32,
+                "epochs": 30, "batch_size": 32, "train_ratio": 0.8, "seed": 42,
             }
         }
     )
@@ -58,6 +74,8 @@ class ManualTrainRequest(BaseModel):
     lr: float = Field(..., gt=0)
     epochs: int = Field(..., gt=0)
     batch_size: int = Field(..., gt=0)
+    train_ratio: Literal[0.6, 0.7, 0.8] = 0.8
+    seed: int | None = None
 
 
 class SearchSpaceResponse(BaseModel):
@@ -125,6 +143,15 @@ class Notebook07ResultResponse(BaseModel):
                     "train_samples": 1076, "val_samples": 223, "test_samples": 225,
                 },
                 "trained_at": "2026-07-14T13:06:56.717767+00:00",
+                "seed": 42,
+                "last_prediction": {
+                    "as_of_date": "2026-08-03",
+                    "target_date": "2026-08-08",
+                    "direction": "up",
+                    "probability_up": 0.62,
+                    "confidence": 0.62,
+                    "saved_at": "2026-08-03T17:20:00+00:00",
+                },
             }
         }
     )
@@ -142,6 +169,8 @@ class Notebook07ResultResponse(BaseModel):
     eval_split: Literal["val", "test"] | None = None
     split_sizes: dict | None = None
     trained_at: str | None = None
+    seed: int | None = None
+    last_prediction: dict | None = None
 
 
 class Notebook07PredictionResponse(BaseModel):

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { fetchJson } from '../utils/api'
 
 export function useDataAnalysis(path) {
   const [state, setState] = useState({ data: null, loading: true, error: null })
+  const [reloadIndex, setReloadIndex] = useState(0)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -16,7 +17,9 @@ export function useDataAnalysis(path) {
       })
 
     return () => controller.abort()
-  }, [path])
+  }, [path, reloadIndex])
 
-  return state
+  const refetch = useCallback(() => setReloadIndex((i) => i + 1), [])
+
+  return { ...state, refetch }
 }

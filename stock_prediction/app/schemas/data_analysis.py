@@ -37,6 +37,15 @@ class StockRawPreviewResponse(BaseModel):
     plot_hint: str = "table — cuplikan baris pertama data OHLCV mentah"
 
 
+class StockLatestResponse(BaseModel):
+    columns: list[str]
+    n: int
+    rows: list[dict[str, Any]]
+    latest_date: str
+    latest_close: float
+    plot_hint: str = "candlestick + table — baris OHLCV paling baru (tail), urut tanggal naik"
+
+
 class ColumnStats(BaseModel):
     count: int
     mean: float

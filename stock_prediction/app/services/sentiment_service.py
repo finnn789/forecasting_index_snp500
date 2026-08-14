@@ -21,10 +21,15 @@ load_dotenv()
 
 _REQUIRED_MODEL_FILES = [
     "config.json",
-    "pytorch_model.bin",
     "tokenizer_config.json",
-    "vocab.txt",
 ]
+# Bobot model & vocab tokenizer tersedia dalam >1 format valid — transformers
+# from_pretrained() menerima keduanya (dipakai nyata oleh
+# pipeline/preprocessing/text_preprocessor.py). Cek "salah satu ada", bukan
+# hardcode 1 format, supaya status tidak salah lapor "tidak tersedia" untuk
+# model yang justru berhasil dimuat pipeline sungguhan.
+_MODEL_WEIGHT_FILES = ["pytorch_model.bin", "model.safetensors"]
+_TOKENIZER_VOCAB_FILES = ["vocab.txt", "tokenizer.json"]
 
 
 def _resolve_model_path() -> str:
@@ -117,7 +122,7 @@ def run_preprocessing_pipeline_stream(
             preprocessor = TextPreprocessor(
                 model_path=_resolve_model_path(),
                 batch_size=batch_size,
-                device=int(os.environ.get("FINBERT_DEVICE", -1)),
+                device=int(os.environ.get("FINBERT_DEVICE", 0)),
             )
             preprocessor._load_pipeline()
         except Exception as e:
@@ -314,14 +319,30 @@ def get_model_status() -> dict:
         # Asumsi HuggingFace Hub (string seperti "ProsusAI/finbert")
         source = "huggingface_hub"
 
-    # Verifikasi keberadaan file wajib
+    # Verifikasi keberadaan file wajib — config/tokenizer_config harus ada
+    # persis, sedangkan bobot model & vocab tokenizer boleh salah satu format
+    # (lihat catatan _MODEL_WEIGHT_FILES/_TOKENIZER_VOCAB_FILES di atas).
     check_dir = snapshot_path if snapshot_path else None
     required_files: dict[str, bool] = {
         f: (check_dir / f).exists() if check_dir else False
         for f in _REQUIRED_MODEL_FILES
     }
-
-    is_available = check_dir is not None and check_dir.exists() and all(required_files.values())
+    weight_files: dict[str, bool] = {
+        f: (check_dir / f).exists() if check_dir else False
+        for f in _MODEL_WEIGHT_FILES
+    }
+    tokenizer_files: dict[str, bool] = {
+        f: (check_dir / f).exists() if check_dir else False
+        for f in _TOKENIZER_VOCAB_FILES
+    }
+    is_available = (
+        check_dir is not None
+        and check_dir.exists()
+        and all(required_files.values())
+        and any(weight_files.values())
+        and any(tokenizer_files.values())
+    )
+    required_files = {**required_files, **weight_files, **tokenizer_files}
 
     # Hitung total ukuran file di snapshot dir (MB)
     model_size_mb: float | None = None

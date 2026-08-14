@@ -5,6 +5,7 @@ from .news_repository import NewsRepository
 from .sentiment_repository import SentimentRepository
 from .stock_repository import StockRepository
 from .artifact_repository import ArtifactRepository
+from .live_data_repository import LiveDataRepository
 
 # Lazy imports: repos konkret dibuat di Wave 2. Factory pakai lazy import.
 from typing import TypedDict
@@ -14,6 +15,7 @@ class Repositories(TypedDict):
     news: NewsRepository
     sentiment: SentimentRepository
     artifact: ArtifactRepository
+    live_data: LiveDataRepository
 
 def get_default_repositories() -> dict:
     """Factory: return dict of configured repositories.
@@ -40,6 +42,7 @@ def get_default_repositories() -> dict:
         "news": NewsRepository(
             raw_dir=base / "data/raw/news",
             processed_dir=base / "data/processed/sentiment",
+            date_suffix=settings.stock_data_range,
         ),
         "sentiment": SentimentRepository(
             raw_dir=base / "data/raw/news",
@@ -48,6 +51,9 @@ def get_default_repositories() -> dict:
         "artifact": ArtifactRepository(
             lstm_dir=base / lstm_dir,
             finbert_dir=base / settings.finbert_local_path,
+        ),
+        "live_data": LiveDataRepository(
+            db_path=base / "data/live/live_data.db",
         ),
     }
 
@@ -58,5 +64,6 @@ __all__ = [
     "SentimentRepository",
     "StockRepository",
     "ArtifactRepository",
+    "LiveDataRepository",
     "get_default_repositories",
 ]

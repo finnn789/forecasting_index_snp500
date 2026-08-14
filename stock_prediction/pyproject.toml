@@ -11,6 +11,7 @@ dependencies = [
     "matplotlib>=3.10.8",
     "nbformat>=5.10.4",
     "numpy>=1.26.0",
+    "optuna>=4.9.0",
     "pandas>=2.2.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0",
@@ -24,6 +25,7 @@ dependencies = [
     "torch>=2.2.0",        # uv akan otomatis mencari versi CUDA di indeks bawah jika tersedia
     "transformers>=4.38.0",
     "uvicorn[standard]>=0.29.0",
+    "yfinance>=0.2.40",
 ]
 
 [project.optional-dependencies]

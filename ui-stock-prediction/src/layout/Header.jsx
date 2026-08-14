@@ -3,12 +3,12 @@ import Icon from '../components/Icon'
 import Input from '../components/Input'
 
 const PAGE_TITLES = {
-  '/': 'Dashboard',
+  '/': 'Prediksi',
   '/pipeline': 'Data Pipeline',
   '/data-analysis': 'Data Analysis',
   '/preprocessing': 'Data Preprocessing',
-  '/model-training': 'Model Training',
-  '/predictions': 'Predictions',
+  '/training': 'Model Training',
+  '/workflow': 'Alur Kerja',
   '/sentiment': 'Sentiment Analysis',
   '/settings': 'Settings',
 }

@@ -33,6 +33,7 @@ from app.schemas.data_analysis import (
     StockCumulativeReturnDrawdownResponse,
     StockDailyReturnsResponse,
     StockDescriptiveStats,
+    StockLatestResponse,
     StockOhlcSpreadResponse,
     StockPreprocessingResponse,
     StockPriceVolumeResponse,
@@ -71,6 +72,18 @@ async def stocks_raw_preview(
     n: int = Query(10, ge=1, le=100, description="Jumlah baris pertama yang ditampilkan"),
 ) -> StockRawPreviewResponse:
     return svc.get_stock_raw_preview(n)
+
+
+@router.get(
+    "/data-analysis/stocks/latest",
+    response_model=StockLatestResponse,
+    summary="Baris OHLCV Terbaru (Tail)",
+    openapi_extra={"x-message": "Data OHLCV terbaru berhasil dimuat"},
+)
+async def stocks_latest(
+    n: int = Query(20, ge=1, le=100, description="Jumlah baris terbaru yang ditampilkan"),
+) -> StockLatestResponse:
+    return svc.get_stock_latest(n)
 
 
 @router.get(

@@ -1,0 +1,8 @@
+,Triple-barrier k=1.0,Triple-barrier k=0.5
+no_nan_inf,True,True
+min_loss_capacity,0.00010612707418685518,8.82503717169343e-06
+auc_real,0.5012285012285012,0.5129047966885805
+auc_null_mean,0.5013431613431613,0.4974141709276844
+auc_null_p95,0.540069615069615,0.5381665449233017
+p_value,0.46,0.34
+signal_significant,False,False

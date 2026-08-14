@@ -1,7 +1,6 @@
 from pathlib import Path
 
 from app.core.exceptions import NotFoundError
-from app.core.settings import settings
 from .base import FileBasedRepository
 
 
@@ -30,11 +29,6 @@ class ArtifactRepository(FileBasedRepository):
                 code="CHECKPOINT_NOT_FOUND",
             )
         return torch.load(path, map_location="cpu")
-
-    def list_lstm_runs(self) -> list[str]:
-        if not self._lstm_dir.exists():
-            return []
-        return [p.stem for p in sorted(self._lstm_dir.glob("*.pt"))]
 
     # ------------------------------------------------------------------
     # Metadata model (menutup bypass json.loads manual di service layer)
@@ -81,6 +75,3 @@ class ArtifactRepository(FileBasedRepository):
         path = self.scaler_path(filename)
         joblib.dump(scaler, path)
         return path
-
-    def finbert_local_dir(self) -> Path:
-        return Path(settings.finbert_local_path)

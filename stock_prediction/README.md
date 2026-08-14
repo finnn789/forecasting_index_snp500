@@ -20,7 +20,4 @@ pip install -r requirements.txt
 
 # Jalankan API
 ./scripts/run_api.sh
-
-# Jalankan pipeline data
-./scripts/run_pipeline.sh
 ```

@@ -3,17 +3,17 @@ import Icon from '../components/Icon'
 import { cn } from '../utils/cn'
 
 const NAV_ITEMS = [
-  // { to: '/', label: 'Dashboard', icon: 'dashboard', end: true },
+  { to: '/', label: 'Prediksi', icon: 'trending_up', end: true },
   // { to: '/pipeline', label: 'Pipeline', icon: 'account_tree' },
   // { to: '/data-analysis', label: 'Data Analysis', icon: 'info' },
   // { to: '/preprocessing', label: 'Data Preprocessing', icon: 'cleaning_services' },
-  { to: '/', label: 'Model Training', icon: 'model_training' },
-  { to: '/predictions', label: 'Predictions', icon: 'trending_up' },
-  // { to: '/data-information', label: 'Data Information', icon: 'query_stats' },
   { to: '/workflow', label: 'Alur Kerja', icon: 'account_tree' },
+  { to: '/training', label: 'Model Training', icon: 'model_training' },
+  // { to: '/data-information', label: 'Data Information', icon: 'query_stats' },
+
   // { to: '/sentiment', label: 'Sentiment', icon: 'newspaper' },
   // { to: '/settings', label: 'Settings', icon: 'settings' },
-  
+
 ]
 
 export default function Sidebar() {

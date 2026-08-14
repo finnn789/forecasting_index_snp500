@@ -1,6 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import MainLayout from './layout/MainLayout'
-import Dashboard from './pages/Dashboard'
 import Pipeline from './pages/Pipeline'
 import DataAnalysis from './pages/DataAnalysis'
 import Preprocessing from './pages/Preprocessing'
@@ -16,12 +15,11 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route element={<MainLayout />}>
-          {/* <Route path="/" element={<Dashboard />} /> */}
+          <Route path="/" element={<Predictions />} />
           <Route path="/pipeline" element={<Pipeline />} />
           <Route path="/data-analysis" element={<DataAnalysis />} />
           <Route path="/preprocessing" element={<Preprocessing />} />
-          <Route path="/" element={<ModelTraining />} />
-          <Route path="/predictions" element={<Predictions />} />
+          <Route path="/training" element={<ModelTraining />} />
           <Route path="/data-information" element={<DataInformation />} />
           <Route path="/workflow" element={<Workflow />} />
           <Route path="/sentiment" element={<Sentiment />} />

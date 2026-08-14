@@ -114,6 +114,7 @@ def run_skripsi_baseline_stream(req: SkripsiTrainRequest, emit: Callable[[dict],
         return
 
     n_iter = req.n_iter if req.n_iter is not None else N_ITER
+    seed = req.seed if req.seed is not None else 42
     run_notebook07_training(
         emit=emit,
         feature_cols=RETURN_FEATURE_COLS_A,
@@ -127,6 +128,7 @@ def run_skripsi_baseline_stream(req: SkripsiTrainRequest, emit: Callable[[dict],
         scaler_filename=BASELINE_FILES["scaler"],
         metadata_filename=BASELINE_FILES["metadata"],
         horizon=RETURN_HORIZON,
+        seed=seed,
         prebuilt_dataset=bundle,
     )
 
@@ -156,6 +158,7 @@ def run_skripsi_finbert_stream(req: SkripsiTrainRequest, emit: Callable[[dict], 
         return
 
     n_iter = req.n_iter if req.n_iter is not None else N_ITER
+    seed = req.seed if req.seed is not None else 42
     run_notebook07_training(
         emit=emit,
         feature_cols=RETURN_FEATURE_COLS_B,
@@ -169,6 +172,7 @@ def run_skripsi_finbert_stream(req: SkripsiTrainRequest, emit: Callable[[dict], 
         scaler_filename=FINBERT_FILES["scaler"],
         metadata_filename=FINBERT_FILES["metadata"],
         horizon=RETURN_HORIZON,
+        seed=seed,
         prebuilt_dataset=bundle,
     )
 
@@ -183,8 +187,9 @@ def run_skripsi_finbert_stream(req: SkripsiTrainRequest, emit: Callable[[dict], 
 def run_skripsi_baseline_manual_stream(req: ManualTrainRequest, emit: Callable[[dict], None]) -> None:
     """Training manual Model A — LSTM-return baseline (5 fitur RETURN OHLCV,
     horizon=5 — sama preprocessing dengan `run_skripsi_baseline_stream`).
-    Baca dataset dari artifact split_mode='manual' (80:20) — lihat
-    `_require_dataset_bundle()`."""
+    Split Train:Test dihitung LIVE sesuai `req.train_ratio` (0.6/0.7/0.8) —
+    TIDAK lagi baca artifact Workflow (`_require_dataset_bundle`), karena
+    preprocessing-nya ringan dan training manual butuh rasio fleksibel."""
     from models.lstm.notebook07_common import run_notebook07_manual_training  # noqa: PLC0415
     from models.lstm.notebook07_trainer import (  # noqa: PLC0415
         ARTIFACT_DIR,
@@ -197,13 +202,10 @@ def run_skripsi_baseline_manual_stream(req: ManualTrainRequest, emit: Callable[[
         load_return_features,
     )
 
-    bundle = _require_dataset_bundle("baseline", "manual", emit)
-    if bundle is None:
-        return
-
+    seed = req.seed if req.seed is not None else 42
     run_notebook07_manual_training(
         emit=emit,
-        config=req.model_dump(),
+        config=req.model_dump(exclude={"train_ratio", "seed"}),
         feature_cols=RETURN_FEATURE_COLS_A,
         load_data_fn=load_return_features,
         capping_cols=RETURN_FEATURE_COLS_A,
@@ -213,15 +215,16 @@ def run_skripsi_baseline_manual_stream(req: ManualTrainRequest, emit: Callable[[
         scaler_filename=BASELINE_FILES["scaler"],
         metadata_filename=BASELINE_FILES["metadata"],
         horizon=RETURN_HORIZON,
-        prebuilt_dataset=bundle,
+        seed=seed,
+        train_ratio=req.train_ratio,
     )
 
 
 def run_skripsi_finbert_manual_stream(req: ManualTrainRequest, emit: Callable[[dict], None]) -> None:
     """Training manual Model B — FinBERT-LSTM-return (6 fitur RETURN
     OHLCV+sentiment_mean, horizon=5 — sama preprocessing dengan
-    `run_skripsi_finbert_stream`). Baca dataset dari artifact split_mode='manual'
-    (80:20) — lihat `_require_dataset_bundle()`."""
+    `run_skripsi_finbert_stream`). Split Train:Test dihitung LIVE sesuai
+    `req.train_ratio` (0.6/0.7/0.8) — TIDAK lagi baca artifact Workflow."""
     from models.lstm.notebook07_common import run_notebook07_manual_training  # noqa: PLC0415
     from models.lstm.notebook07_trainer import (  # noqa: PLC0415
         ARTIFACT_DIR,
@@ -234,13 +237,10 @@ def run_skripsi_finbert_manual_stream(req: ManualTrainRequest, emit: Callable[[d
         load_return_features,
     )
 
-    bundle = _require_dataset_bundle("finbert", "manual", emit)
-    if bundle is None:
-        return
-
+    seed = req.seed if req.seed is not None else 42
     run_notebook07_manual_training(
         emit=emit,
-        config=req.model_dump(),
+        config=req.model_dump(exclude={"train_ratio", "seed"}),
         feature_cols=RETURN_FEATURE_COLS_B,
         load_data_fn=load_return_features,
         capping_cols=RETURN_FEATURE_COLS_B,
@@ -250,7 +250,8 @@ def run_skripsi_finbert_manual_stream(req: ManualTrainRequest, emit: Callable[[d
         scaler_filename=FINBERT_FILES["scaler"],
         metadata_filename=FINBERT_FILES["metadata"],
         horizon=RETURN_HORIZON,
-        prebuilt_dataset=bundle,
+        seed=seed,
+        train_ratio=req.train_ratio,
     )
 
 
@@ -299,7 +300,7 @@ def _notebook07_variant_params(variant: Literal["baseline", "finbert"]) -> dict:
 def get_notebook07_result(variant: Literal["baseline", "finbert"]) -> Notebook07ResultResponse:
     """Hasil Random Search terakhir yang sudah dipersist — SELALU 200,
     `is_available=False` kalau belum pernah training."""
-    from models.lstm.notebook07_common import load_trained_notebook07  # noqa: PLC0415
+    from models.lstm.notebook07_common import load_last_prediction, load_trained_notebook07  # noqa: PLC0415
 
     params = _notebook07_variant_params(variant)
     loaded = load_trained_notebook07(
@@ -326,6 +327,11 @@ def get_notebook07_result(variant: Literal["baseline", "finbert"]) -> Notebook07
         eval_split=meta.get("eval_split", "val"),
         split_sizes=meta.get("split_sizes"),
         trained_at=meta.get("trained_at"),
+        seed=meta.get("seed"),
+        last_prediction=load_last_prediction(
+            artifact_dir=params["artifact_dir"],
+            metadata_filename=params["metadata_filename"],
+        ),
     )
 
 
@@ -335,7 +341,7 @@ def predict_notebook07(variant: Literal["baseline", "finbert"]) -> Notebook07Pre
     Raises:
         NotFoundError: Jika model belum tersedia (belum dilatih).
     """
-    from models.lstm.notebook07_common import predict_latest_notebook07  # noqa: PLC0415
+    from models.lstm.notebook07_common import predict_latest_notebook07, save_last_prediction  # noqa: PLC0415
 
     params = _notebook07_variant_params(variant)
     result = predict_latest_notebook07(**params)
@@ -345,6 +351,11 @@ def predict_notebook07(variant: Literal["baseline", "finbert"]) -> Notebook07Pre
             code="MODEL_NOT_TRAINED",
             detail=f"Artefak tidak ditemukan di {params['artifact_dir']}",
         )
+    save_last_prediction(
+        result,
+        artifact_dir=params["artifact_dir"],
+        metadata_filename=params["metadata_filename"],
+    )
     return Notebook07PredictionResponse(
         variant=variant,
         **{k: v for k, v in result.items() if k != "trained"},

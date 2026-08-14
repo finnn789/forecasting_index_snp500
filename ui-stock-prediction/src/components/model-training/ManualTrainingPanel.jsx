@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
 import Card, { CardHeader, CardTitle, CardContent } from '../Card'
 import Button from '../Button'
 import Input from '../Input'
@@ -7,7 +6,6 @@ import Icon from '../Icon'
 import PlotlyChart from '../charts/PlotlyChart'
 import { BASE_LAYOUT, CHART_COLORS } from '../../utils/chartTheme'
 import { useManualTrainStream } from '../../hooks/useManualTrainStream'
-import { useDatasetGate } from '../../hooks/useDatasetGate'
 import { cn } from '../../utils/cn'
 import { fmtNum, fmtPct } from './format'
 
@@ -20,7 +18,15 @@ const DEFAULT_FORM = {
   lr: 0.001,
   epochs: 30,
   batch_size: 32,
+  train_ratio: 0.8,
+  seed: 42,
 }
+
+const TRAIN_RATIO_OPTIONS = [
+  { value: 0.6, label: '60 / 40' },
+  { value: 0.7, label: '70 / 30' },
+  { value: 0.8, label: '80 / 20' },
+]
 
 const SELECT_CLASS = cn(
   'h-10 w-full rounded border border-slate-300 bg-white px-3 text-sm text-slate-900',
@@ -38,14 +44,13 @@ const SELECT_CLASS = cn(
  * Training ini MENIMPA artefak resmi varian (sama nama file dgn Random
  * Search) — sengaja, supaya halaman Prediction otomatis ikut ter-update.
  */
-export default function ManualTrainingPanel({ endpoint, variant, prefill, onDone }) {
+export default function ManualTrainingPanel({ endpoint, prefill, onDone }) {
   const [form, setForm] = useState(DEFAULT_FORM)
   const [appliedToken, setAppliedToken] = useState(prefill?.token)
   const stream = useManualTrainStream(endpoint)
-  const gate = useDatasetGate(variant, 'manual')
 
   const isRunning = stream.status === 'running'
-  const canStart = !isRunning && !gate.loading && gate.ready
+  const canStart = !isRunning
 
   // "Adjust state during render" (bukan useEffect) supaya form ter-prefill
   // tiap prefill.token berubah (mis. user klik "Retrain dengan Best Config"
@@ -53,7 +58,10 @@ export default function ManualTrainingPanel({ endpoint, variant, prefill, onDone
   if (prefill?.token !== appliedToken) {
     setAppliedToken(prefill?.token)
     if (prefill?.config) {
-      setForm(prefill.config)
+      // best_config hasil Random Search tidak punya train_ratio/seed
+      // (keduanya bukan bagian hyperparameter yang di-sample) — pertahankan
+      // nilai yang sedang aktif di form manual, jangan ikut ditimpa undefined.
+      setForm((prev) => ({ ...prev, ...prefill.config, train_ratio: prev.train_ratio, seed: prev.seed }))
     }
   }
 
@@ -79,6 +87,8 @@ export default function ManualTrainingPanel({ endpoint, variant, prefill, onDone
       lr: Number(form.lr),
       epochs: Number(form.epochs),
       batch_size: Number(form.batch_size),
+      train_ratio: Number(form.train_ratio),
+      seed: Number(form.seed),
     })
   }
 
@@ -261,7 +271,44 @@ export default function ManualTrainingPanel({ endpoint, variant, prefill, onDone
                 <option value="sigmoid">sigmoid</option>
               </select>
             </Field>
+            <Field label="Split Train : Test">
+              <select
+                className={SELECT_CLASS}
+                disabled={isRunning}
+                value={form.train_ratio}
+                onChange={(e) => updateField('train_ratio', e.target.value)}
+              >
+                {TRAIN_RATIO_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Seed">
+              <Input
+                type="number"
+                step={1}
+                disabled={isRunning}
+                value={form.seed}
+                onChange={(e) => updateField('seed', e.target.value)}
+              />
+            </Field>
           </div>
+
+          {prefill?.config && (
+            <p className="text-xs text-slate-400">
+              {prefill.source === 'persisted' ? (
+                <>
+                  Form di-prefill otomatis dari <span className="font-medium text-slate-500">Best Config Random
+                  Search terakhir</span> yang tersimpan{prefill.trainedAt ? ` (dilatih ${prefill.trainedAt})` : ''} —
+                  ganti nilai apa pun kalau perlu.
+                </>
+              ) : (
+                <>Form di-prefill dari hasil Random Search yang baru saja selesai.</>
+              )}
+            </p>
+          )}
 
           <Button onClick={handleStart} disabled={!canStart}>
             {isRunning ? (
@@ -271,18 +318,6 @@ export default function ManualTrainingPanel({ endpoint, variant, prefill, onDone
             )}
             Mulai Training Manual
           </Button>
-
-          {!gate.loading && !gate.ready && (
-            <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              <Icon name="info" className="text-lg" />
-              <span>
-                Dataset latih (split 80/20) belum dibangun atau basi.{' '}
-                <Link to="/workflow" className="font-medium underline">
-                  Bangun di halaman Workflow →
-                </Link>
-              </span>
-            </div>
-          )}
 
           {stream.status !== 'idle' && (
             <div className="space-y-2 rounded border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-medium text-slate-600">
@@ -380,6 +415,10 @@ export default function ManualTrainingPanel({ endpoint, variant, prefill, onDone
                 <div>
                   <p className="uppercase tracking-wide text-slate-400">Final Test Acc</p>
                   <p className="font-mono text-slate-700">{fmtNum(stream.result.final_test_acc)}</p>
+                </div>
+                <div>
+                  <p className="uppercase tracking-wide text-slate-400">Seed</p>
+                  <p className="font-mono text-slate-700">{stream.result.seed}</p>
                 </div>
               </div>
               <div className="space-y-1 text-xs">

@@ -9,6 +9,7 @@ from fastapi import APIRouter
 from app.api.v1.routes_data_analysis import router as data_analysis_router
 from app.api.v1.routes_data_information import router as data_information_router
 from app.api.v1.routes_general import router as general_router
+from app.api.v1.routes_live import router as live_router
 from app.api.v1.routes_prediction import router as prediction_router
 from app.api.v1.routes_sentiment import router as sentiment_router
 from app.api.v1.routes_status import router as status_router
@@ -37,3 +38,6 @@ api_router.include_router(data_information_router, prefix="/api/v1")
 
 # Routes: POST /api/v1/train/notebook05, GET /api/v1/train/notebook05/grid-search-result
 api_router.include_router(training_router, prefix="/api/v1")
+
+# Routes: GET /api/v1/live/stocks/latest, GET /api/v1/live/news/latest, POST /api/v1/live/predict/finbert-lstm
+api_router.include_router(live_router, prefix="/api/v1")

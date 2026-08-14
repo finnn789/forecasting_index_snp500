@@ -58,6 +58,7 @@ from app.schemas.data_analysis import (
     SentimentScoringDistributionResponse,
     StockCorrelationResponse,
     StockCumulativeReturnDrawdownResponse,
+    StockLatestResponse,
     StockDailyReturnsResponse,
     StockDescriptiveStats,
     StockOhlcSpreadResponse,
@@ -115,6 +116,19 @@ def _preview_rows(df: pd.DataFrame, n: int) -> list[dict]:
             head[col] = head[col].map(format_iso_date)
     head = head.where(pd.notnull(head), None)
     return head.to_dict(orient="records")
+
+
+def _tail_rows(df: pd.DataFrame, n: int) -> list[dict]:
+    """N baris terakhir (paling baru), urut tanggal naik, siap di-serialize JSON.
+
+    Kolom datetime diformat ISO string; NaN/NaT diubah jadi None (JSON null).
+    """
+    tail = df.tail(n).copy()
+    for col in tail.columns:
+        if pd.api.types.is_datetime64_any_dtype(tail[col]):
+            tail[col] = tail[col].map(format_iso_date)
+    tail = tail.where(pd.notnull(tail), None)
+    return tail.to_dict(orient="records")
 
 
 def _load_raw_stock() -> pd.DataFrame:
@@ -178,6 +192,18 @@ def get_stock_raw_preview(n: int = 10) -> StockRawPreviewResponse:
         columns=df.columns.tolist(),
         n=min(n, len(df)),
         rows=_preview_rows(df, n),
+    )
+
+
+def get_stock_latest(n: int = 20) -> StockLatestResponse:
+    df = _load_raw_stock().sort_values("Date").reset_index(drop=True)
+    last_row = df.iloc[-1]
+    return StockLatestResponse(
+        columns=df.columns.tolist(),
+        n=min(n, len(df)),
+        rows=_tail_rows(df, n),
+        latest_date=format_iso_date(last_row["Date"]),
+        latest_close=float(last_row["Close"]),
     )
 
 

@@ -33,6 +33,7 @@ const HISTORY_COLUMNS = [
  */
 export default function RandomSearchPanel({ endpoint, variant, onDone, onUseBestConfig }) {
   const [nIter, setNIter] = useState(20)
+  const [seed, setSeed] = useState(42)
   const stream = useRandomSearchStream(endpoint)
   const gate = useDatasetGate(variant, 'random_search')
   const logEndRef = useRef(null)
@@ -49,7 +50,7 @@ export default function RandomSearchPanel({ endpoint, variant, onDone, onUseBest
 
   function handleStart() {
     if (!canStart) return
-    stream.startTraining({ n_iter: Number(nIter) })
+    stream.startTraining({ n_iter: Number(nIter), seed: Number(seed) })
   }
 
   const currentEpochNums = useMemo(() => stream.currentEpochs.map((e) => e.epoch), [stream.currentEpochs])
@@ -163,6 +164,17 @@ export default function RandomSearchPanel({ endpoint, variant, onDone, onUseBest
                 disabled={isRunning}
                 value={nIter}
                 onChange={(e) => setNIter(e.target.value)}
+                className="w-28"
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-slate-600">Seed</label>
+              <Input
+                type="number"
+                step={1}
+                disabled={isRunning}
+                value={seed}
+                onChange={(e) => setSeed(e.target.value)}
                 className="w-28"
               />
             </div>
@@ -361,6 +373,10 @@ export default function RandomSearchPanel({ endpoint, variant, onDone, onUseBest
                 <div>
                   <p className="uppercase tracking-wide text-slate-400">Best Val Acc</p>
                   <p className="font-mono text-slate-700">{fmtNum(stream.result.best_val_acc)}</p>
+                </div>
+                <div>
+                  <p className="uppercase tracking-wide text-slate-400">Seed</p>
+                  <p className="font-mono text-slate-700">{stream.result.seed}</p>
                 </div>
               </div>
               <div className="space-y-1 text-xs">

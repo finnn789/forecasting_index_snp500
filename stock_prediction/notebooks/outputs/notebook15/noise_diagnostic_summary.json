@@ -1,0 +1,29 @@
+{
+  "n_samples": 1521,
+  "std_1d": 0.013003559582355918,
+  "std_h5_expected_random_walk": 0.02907684317561661,
+  "std_h5_actual": 0.02631841883377373,
+  "snr_ratio": 0.9051332936941363,
+  "deadband_scan": [
+    {
+      "theta": 0.0025,
+      "pct_in_deadband": 0.10059171597633136
+    },
+    {
+      "theta": 0.005,
+      "pct_in_deadband": 0.18803418803418803
+    },
+    {
+      "theta": 0.01,
+      "pct_in_deadband": 0.3668639053254438
+    },
+    {
+      "theta": 0.015,
+      "pct_in_deadband": 0.5279421433267587
+    },
+    {
+      "theta": 0.02,
+      "pct_in_deadband": 0.6600920447074293
+    }
+  ]
+}
